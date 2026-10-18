@@ -1,0 +1,8 @@
+build/
+tools/cc65-src/
+tools/vice/
+tools/gh/
+tests/gb-test-roms/
+tests/roms/
+*.reu
+.DS_Store
