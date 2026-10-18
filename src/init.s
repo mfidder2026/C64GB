@@ -25,6 +25,18 @@ fill_pages:
         bne :-
         rts
 
+; $0149 RAM size codes: none, 2 KB, 8 KB, 32 KB, 128 KB, 64 KB (in pages)
+ramsize_lo: .byte 0, 8, 32, 128, 0, 0
+ramsize_hi: .byte 0, 0, 0, 0, 2, 1
+batt_types: .byte $03, $06, $09, $0D, $0F, $10, $13, $1B, $1E, $22, $FF
+batt_types_end:
+
+.segment "BSS"
+sram_pages: .res 2              ; cartridge RAM size in 256-byte pages
+sav_dirty:  .res 1              ; cartridge RAM was enabled since the last save
+has_batt:   .res 1              ; cartridge RAM is battery backed
+.segment "CODE"
+
 ; Set up memory maps, read the cartridge header and reset the GB state.
 gb_init:
         ldx #<(__ZPCODE_SIZE__-1)   ; install the zero page dispatcher
@@ -116,6 +128,13 @@ gb_init:
         lda #$47                ; cartridge type
         sta ml
         jsr rd
+        ldx #batt_types_end-batt_types-1
+:       cmp batt_types,x        ; battery-backed RAM: save games
+        beq :+
+        dex
+        bpl :-
+:       inx                     ; X = 0: no battery
+        stx has_batt
         ldx #0
         cmp #$01
         bcc @mbc
@@ -158,10 +177,21 @@ gb_init:
 @msk:
         inc ml                  ; $0149: RAM size
         jsr rd
+        cmp #6
+        bcc :+
+        lda #0
+:       tay
+        lda ramsize_lo,y        ; size in 256-byte pages (for save files)
+        sta sram_pages
+        lda ramsize_hi,y
+        sta sram_pages+1
+        tya
         ldx mbc_type
         cpx #2
         bne :+
-        lda #1                  ; MBC2 has built-in RAM
+        lda #2                  ; MBC2: 512 x 4 bits built in
+        sta sram_pages
+        lda #1
 :       cmp #0
         beq :+
         lda #1

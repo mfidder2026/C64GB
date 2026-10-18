@@ -75,9 +75,20 @@ start:
         jsr timer_init          ; (before gb_init, which clears the overlay)
         jsr gb_init
         jsr sound_init
+        lda #0
+        sta sav_active
+        sta sav_dirty
         lda has_sram
-        beq :+
+        beq :++
+        lda sav_loaded          ; keep a save file loaded by the browser
+        bne :+
         jsr sram_clear
+:       lda has_batt            ; saving possible: battery RAM and a file name
+        beq :+
+        lda sav_name
+        beq :+
+        lda #1
+        sta sav_active
 :       jmp loop
 
 irq:    rti
@@ -141,10 +152,80 @@ hicode_copy:
         bne :-
         rts
 
-; RESTORE: back to the ROM browser.
+; RESTORE: save the game if needed, then back to the ROM browser.
 nmi:    ldx #$FF
         txs
-        jmp start
+        lda #$35
+        sta $01
+        lda sav_dirty
+        beq :+
+        jsr save_game
+:       jmp start
+
+; ---- save games ------------------------------------------------------------
+
+.segment "BSS"
+sav_name:   .res 64             ; save file name (ROM name with .sav), "" = none
+sav_loaded: .res 1              ; the browser loaded a save file into the REU
+sav_active: .res 1              ; saving is possible for the running game
+f1_prev:    .res 1
+.segment "CODE"
+
+; Write the cartridge RAM to the save file through the Ultimate DOS.
+save_game:
+        lda sav_active
+        beq @r
+        lda #5                  ; green border while saving
+        sta $D020
+        jsr sram_flush
+        lda #$01                ; open file for writing, always overwrite
+        sta UCI_CMD
+        lda #$02
+        sta UCI_CMD
+        lda #$0E
+        sta UCI_CMD
+        ldy #0
+:       lda sav_name,y
+        beq :+
+        sta UCI_CMD
+        iny
+        bne :-
+:       jsr uci_go
+        bcc @err
+        lda #$01                ; save REU $FE0000, sram_pages * 256 bytes
+        sta UCI_CMD
+        lda #$22
+        sta UCI_CMD
+        lda #0
+        sta UCI_CMD
+        sta UCI_CMD
+        lda #REU_SRAM
+        sta UCI_CMD
+        lda #0
+        sta UCI_CMD
+        sta UCI_CMD
+        lda sram_pages
+        sta UCI_CMD
+        lda sram_pages+1
+        sta UCI_CMD
+        lda #0
+        sta UCI_CMD
+        jsr uci_go
+        php
+        lda #$01                ; close
+        sta UCI_CMD
+        lda #$03
+        sta UCI_CMD
+        jsr uci_go
+        plp
+        bcc @err
+        lda #0
+        sta sav_dirty
+        sta $D020
+@r:     rts
+@err:   lda #2                  ; red border: saving failed
+        sta $D020
+        rts
 
 ; ---- REU backend -------------------------------------------------------------
 
@@ -468,6 +549,7 @@ read_input:
 :       lda #$FE                ; column 0: RETURN = Start (row 1)
         sta $DC00
         lda $DC01
+        tax
         and #$02
         bne :+
         lda joy_btns
@@ -475,7 +557,15 @@ read_input:
         sta joy_btns
 :       lda #$FF
         sta $DC00
-        rts
+        txa                     ; F1 (row 4): save the game on key press
+        and #$10
+        cmp f1_prev
+        sta f1_prev
+        beq :+
+        cmp #0
+        bne :+
+        jmp save_game
+:       rts
 
 ; C64 joystick (bit0 up, 1 down, 2 left, 3 right) -> GB (0 R, 1 L, 2 U, 3 D)
 joymap:
@@ -517,6 +607,67 @@ autokey_tab:
         .include "autokeys.inc"
         .word $FFFF
 .endif
+
+.segment "HICODE"            ; resident helpers for save games
+; Push the command written to UCI_CMD, wait, drain the reply.
+; C=1 if the status starts with "00".
+uci_go:
+        lda #$01                ; PUSH_CMD
+        sta UCI_CTRL
+:       lda UCI_CTRL            ; wait for a data state
+        and #$20
+        beq :-
+:       lda UCI_CTRL            ; skip the data channel
+        bpl :+
+        lda UCI_DATA
+        jmp :-
+:       lda #0
+        sta etmp
+        sta etmp2
+        lda UCI_CTRL
+        and #$40
+        beq :+
+        lda UCI_STATUS
+        sta etmp
+        lda UCI_STATUS
+        sta etmp2
+:       lda #$02                ; accept
+        sta UCI_CTRL
+:       lda UCI_CTRL
+        and #$30
+        cmp #$10
+        beq :-
+        lda etmp
+        cmp #'0'
+        bne :+
+        lda etmp2
+        cmp #'0'
+        bne :+
+        sec
+        rts
+:       clc
+        rts
+
+; Write all cached cartridge RAM pages back to the REU.
+sram_flush:
+        ldy nslots
+        dey
+@s:     lda slot_khi,y
+        cmp #REU_SRAM
+        bcc @nx
+        cmp #$FF
+        beq @nx
+        sta key_save+1
+        lda slot_klo,y
+        sta key_save
+        sty etmp2
+        lda slot_page,y
+        jsr backend_store_page
+        ldy etmp2
+@nx:    dey
+        bpl @s
+        rts
+
 
 .segment "BROWSER"           ; one-time set-up, runs from the overlay
 ; ---- video ----------------------------------------------------------------

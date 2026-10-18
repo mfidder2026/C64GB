@@ -366,6 +366,8 @@ mbc_ram_enable:
         cmp #$0A
         beq :+
         lda #0
+        beq :++
+:       sta sav_dirty           ; the game may write its save data now
 :       sta ram_en
         jmp sram_map
 

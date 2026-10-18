@@ -43,6 +43,9 @@ respbuf  = VRAM1+$100           ; 256
 
 ; Returns C=1 when a ROM was loaded (or one is assumed to be in the REU).
 browser:
+        lda #0                  ; no save file until a ROM is loaded
+        sta sav_name
+        sta sav_loaded
         jsr text_init
         lda UCI_CMD
         and #$7F
@@ -377,10 +380,44 @@ load_entry:
         jsr print_at
         lda #$01                ; FA_READ
         sta cmdbuf+2
-        lda #$02                ; open file
+        lda #$02                ; open the ROM
         ldy #1
         jsr dos_name_cmd
         bne @fail
+        lda #0                  ; ROM -> REU $000000
+        jsr load_open
+        bne @fail
+        jsr make_savname        ; save file next to it? -> REU $FE0000
+        lda #<(sav_name-1)
+        sta b_ptr
+        lda #>(sav_name-1)
+        sta b_ptr+1
+        lda #$01
+        sta cmdbuf+2
+        lda #$02
+        ldy #1
+        jsr dos_name_cmd
+        bne @ok                 ; no save file yet
+        lda #REU_SRAM
+        jsr load_open
+        bne @ok
+        lda #1
+        sta sav_loaded
+@ok:    sec
+        rts
+@fail:  ldx #24
+        jsr clear_row
+        lda #<respbuf
+        ldx #>respbuf
+        ldy #24
+        jsr print_at
+        clc
+        rts
+
+; Load the opened file into the REU at bank A, offset 0, and close it.
+; Z=1 on success.
+load_open:
+        pha
         lda #$07                ; file info: size in bytes 0-3
         sta cmdbuf+1
         lda #$01
@@ -398,10 +435,11 @@ load_entry:
         sta cmdbuf+9
         jsr uci_status
         jsr uci_accept
-        lda #0                  ; REU address 0
+        pla
+        sta cmdbuf+4            ; REU address bank:00:00
+        lda #0
         sta cmdbuf+2
         sta cmdbuf+3
-        sta cmdbuf+4
         sta cmdbuf+5
         lda #$21                ; load REU
         ldx #10
@@ -410,16 +448,6 @@ load_entry:
         lda #$03                ; close file
         jsr dos_simple
         plp
-        bne @fail
-        sec
-        rts
-@fail:  ldx #24
-        jsr clear_row
-        lda #<respbuf
-        ldx #>respbuf
-        ldy #24
-        jsr print_at
-        clc
         rts
 
 ; b_ptr = ENTRIES + A * 64
@@ -716,5 +744,38 @@ msg_loading: .byte "Loading ROM into REU...", 0
 msg_nouci:   .byte "No Ultimate Command Interface found.", 0
 msg_noreu:   .byte "Enable it in the Ultimate menu, or load", 0
 msg_noreu2:  .byte "a ROM into the REU, then press fire.", 0
+
+.segment "CODE"
+
+.segment "HICODE"              ; (resident; keeps the overlay within 2 KB)
+; sav_name = name of the selected entry with its extension replaced by "sav".
+make_savname:
+        ldx #$FF                ; position of the last "."
+        ldy #1
+@c:     lda (b_ptr),y
+        sta sav_name-1,y
+        beq @end
+        cmp #'.'
+        bne :+
+        tya
+        tax
+:       iny
+        cpy #58
+        bne @c
+@end:   cpx #$FF
+        bne :+
+        tya                     ; no extension: append "."
+        tax
+        lda #'.'
+        sta sav_name-1,x
+:       lda #'s'
+        sta sav_name,x
+        lda #'a'
+        sta sav_name+1,x
+        lda #'v'
+        sta sav_name+2,x
+        lda #0
+        sta sav_name+3,x
+        rts
 
 .segment "CODE"

@@ -90,6 +90,10 @@ This happens around the eyes, for example.
   - general and HBlank DMA (HDMA)
   - double-speed mode
 - **Cartridge RAM** in the REU, paged through the same cache with write-back.
+- **Save games:** for battery-backed cartridges, `game.sav` next to `game.gb` is
+  loaded with the ROM. F1, or returning to the browser with RESTORE, writes it back
+  through the Ultimate DOS. The format is a raw cartridge RAM dump, as used by most
+  emulators, so existing `.sav` files work too.
 - **Sound through the SID**:
   - GB pulse channels 1 and 2 play on SID voices 1 and 2, with duty → pulse width and
     the channel 1 frequency sweep
@@ -119,7 +123,8 @@ This happens around the eyes, for example.
 | B | Space |
 | Start | RETURN |
 | Select | Left SHIFT |
-| *back to the ROM browser* | RESTORE |
+| *save the game* | F1 |
+| *back to the ROM browser (saves first)* | RESTORE |
 
 If the Command Interface is disabled, C64GB runs the ROM that is already in the REU.
 This is the mode used for testing in VICE.
@@ -210,7 +215,7 @@ prints C64 cycles per routine. It is how the hot spots above were found and redu
 - [x] Real-time pacing with adaptive frame skip
 - [ ] Performance work towards full speed (pre-converted tile cache)
 - [x] Sound through the SID (first version)
-- [ ] Save games to SD (`DOS_CMD_SAVE_REU`)
+- [x] Save games to USB/SD (`DOS_CMD_LOAD_REU` / `DOS_CMD_SAVE_REU`), not yet tested on hardware
 - [x] Game Boy Color support (approximated with the 16 C64 colours)
 - [x] Sprite-aware GBC colour cells: background slots a cell doesn't use go to sprite colours
 

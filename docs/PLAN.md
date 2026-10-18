@@ -60,7 +60,7 @@ flowchart LR
 | 4 | Sprites, window, palettes, frame skip, fine SCX scroll | Homebrew games playable | all but fine SCX scroll |
 | 5 | Performance: profile in sim65, threaded dispatch, tile cache | ≥ 90% speed at 48 MHz | |
 | 6 | Sound via SID | Recognisable music | ✅ first version (checked with VICE SID register dumps) |
-| 7 | Cartridge RAM saves via `SAVE_REU`, basic MBC3 RTC | Games can save | |
+| 7 | Cartridge RAM saves via `SAVE_REU`, basic MBC3 RTC | Games can save | saves built (F1 / RESTORE), untested on hardware; no RTC |
 | 8 | Accurate STAT/mode-3 timing | Raster-effect games correct | |
 | 9 | Game Boy Color | Colours approximated with the 16 C64 colours | ✅ first version (µCity, cgb-acid2) |
 
