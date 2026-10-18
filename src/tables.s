@@ -39,11 +39,4 @@ cbtab_lo:
 cbtab_hi:
         .hibytes CBOPS
 
-.segment "BSS"
-
-slot_page:  .res NSLOTS         ; C64 page of each cache slot
-slot_klo:   .res NSLOTS         ; REU page number held by the slot
-slot_khi:   .res NSLOTS         ; ($FF = empty)
-slot_gb:    .res NSLOTS         ; GB page currently mapped to the slot ($FF = none)
-
 .segment "CODE"

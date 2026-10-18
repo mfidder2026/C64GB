@@ -1,5 +1,5 @@
 ; ---------------------------------------------------------------------------
-; GB memory access through the RMAP/WMAP page tables, ROM page cache
+; GB memory access through the RMAP/WMAP page tables, page cache
 ; ---------------------------------------------------------------------------
 
 ; A = byte at GB address ml/mh. Clobbers X, Y.
@@ -20,21 +20,20 @@ rd_hl:
         ; fall through, X = page
 
 rd_slow:
-        cpx #$80
-        bcs @hi
-        jsr rom_miss
+        cpx #$FF
+        beq @ff
+        jsr map_page            ; ROM / cartridge RAM cache miss
+        beq @none
         sta mp+1
         ldy ml
         lda (mp),y
         rts
-@hi:    cpx #$FF
-        bne @ff
-        ldx ml
+@ff:    ldx ml
         bpl @io
         lda IORAM,x
         rts
 @io:    jmp io_read_x
-@ff:    lda #$FF                ; disabled cartridge RAM etc.
+@none:  lda #$FF                ; disabled cartridge RAM etc.
         rts
 
 ; Write A to GB address ml/mh. Clobbers X, Y.
@@ -66,20 +65,58 @@ wr_slow:
         bcs @hi
         jmp mbc_write
 @hi:    cpx #$FF
-        bne @ign
-        ldx ml
+        beq @ff
+.ifdef SRAM_CACHED
+        cpx #$A0
+        bcc @ign
+        cpx #$C0
+        bcs @ign
+        pha
+        jsr sram_miss           ; map the cartridge RAM page, then write
+        tay
+        pla
+        cpy #0
+        beq @ign
+        sty mp+1
+        ldy ml
+        sta (mp),y
+.endif
+@ign:   rts
+@ff:    ldx ml
         bpl @io
         cpx #$FF
         beq @io
         sta IORAM,x
-@ign:   rts
+        rts
 @io:    jmp io_write_x
 
+; C64 page for GB page X when RMAP has none: loads ROM / cartridge RAM pages
+; into the cache. Returns A = page (Z=1: unmapped). Clobbers X, Y.
+map_page:
+        cpx #$80
+        bcs :+
+        jmp rom_miss
+:       cpx #$FF
+        bne :+
+        lda #>IORAM
+        rts
+:
+.ifdef SRAM_CACHED
+        cpx #$A0
+        bcc @none
+        cpx #$C0
+        bcs @none
+        jmp sram_miss
+.endif
+@none:  lda #0
+        rts
+
 ; ---------------------------------------------------------------------------
-; ROM page cache
+; Page cache
 ;
-; Each slot holds one 256-byte page of the ROM, tagged with its REU page
-; number (key). The ROM lives at REU address 0, so key = bank*64 + page%64.
+; Each slot holds one 256-byte page from the REU, tagged with its REU page
+; number (key). ROM pages: key = bank*64 + page%64. Cartridge RAM pages live
+; at REU $FE0000 (key_hi >= $FE) and are written back when evicted.
 ; ---------------------------------------------------------------------------
 
 ; Resolve ROM page X ($00-$7F): returns A = C64 page, RMAP updated.
@@ -107,15 +144,62 @@ rom_miss:
         lda tmp_b
         ror
         ror
-        ror                     ; bits 1:0 -> 7:6 (C was clear? masked below)
+        ror                     ; bits 1:0 -> 7:6
         and #$C0
         sta key_lo
         lda miss_pg
         and #$3F
         ora key_lo
         sta key_lo
+        jsr cache_get
+        ldx miss_pg
+        sta RMAP,x
+        ora #0                  ; Z=0
+        rts
 
-        ldy #NSLOTS-1
+.ifdef SRAM_CACHED
+; Resolve cartridge RAM page X ($A0-$BF). Returns A = C64 page (0 when the
+; RAM is disabled), RMAP and WMAP updated.
+sram_miss:
+        lda ram_en
+        and has_sram
+        beq @off
+        lda ram_bank
+        cmp #8
+        bcs @off                ; MBC3 RTC register
+        stx miss_pg
+        lsr                     ; key = $FE00 + bank*32 + page%32
+        lsr
+        lsr
+        clc
+        adc #REU_SRAM
+        sta key_hi
+        lda ram_bank
+        asl
+        asl
+        asl
+        asl
+        asl
+        sta key_lo
+        txa
+        and #$1F
+        ora key_lo
+        sta key_lo
+        jsr cache_get
+        ldx miss_pg
+        sta RMAP,x
+        sta WMAP,x
+        ora #0
+        rts
+@off:   lda #0
+        rts
+.endif
+
+; Find or load the page key_hi:key_lo. Returns A = C64 page, Y = slot, and
+; records miss_pg as the slot's GB page.
+cache_get:
+        ldy nslots
+        dey
 @srch:  lda slot_klo,y
         cmp key_lo
         bne @nx
@@ -134,33 +218,50 @@ rom_miss:
         lda slot_page,y
         jsr backend_load_page   ; load REU page key -> C64 page A
         ldy miss_slot
-
-@found: ldx miss_pg
-        txa
+@found: lda miss_pg
         sta slot_gb,y
         lda slot_page,y
-        sta RMAP,x
         rts
 
-; Pick the next slot to replace and unmap its previous owner. Returns Y.
+; Pick the next slot to replace, write it back if it holds cartridge RAM and
+; unmap its previous owner. Returns Y.
 evict:
         ldy clock
 @again: iny
-        cpy #NSLOTS
+        cpy nslots
         bcc :+
         ldy #0
 :       lda slot_page,y
         cmp pcb+1
         beq @again
         sty clock
-        ldx slot_gb,y
-        bmi @done               ; $FF = not mapped
+        ldx slot_khi,y
+        cpx #REU_SRAM
+        bcc :+
+        cpx #$FF
+        beq :+
+        sty etmp2               ; dirty-capable page: store it back
+        ldx slot_klo,y
+        stx key_save
+        ldx slot_khi,y
+        stx key_save+1
+        lda slot_page,y
+        jsr backend_store_page  ; C64 page A -> REU page key_save
+        ldy etmp2
+:       ldx slot_gb,y
+        cpx #$FF
+        beq @done               ; not mapped
+        lda slot_page,y
         cmp RMAP,x
         bne :+
         lda #0
         sta RMAP,x
+        cpx #$80
+        bcc :+
+        sta WMAP,x              ; cartridge RAM page
+        bcs @done
 :       txa
-        eor #$40                ; same key could be mapped in the other region
+        eor #$40                ; same ROM key could be mapped in the other region
         tax
         lda slot_page,y
         cmp RMAP,x
@@ -199,7 +300,7 @@ bank_lo_changed:
         jmp pc_resolve
 :       rts
 
-; Map or unmap cartridge RAM at $A000-$BFFF according to ram_en/has_sram.
+; Cartridge RAM enable / bank / RTC selection changed: reset its mapping.
 sram_map:
         lda ram_en
         and has_sram
@@ -221,8 +322,10 @@ sram_map:
         dex
         bpl :-
         rts
-@on:    ldx #31
-        lda #>(SRAM+$1F00)
+@on:
+.ifdef SRAM_RES
+        ldx #31                 ; sim65: one resident bank
+        lda #>(SRAM_RES+$1F00)
 :       sta RMAP+$A0,x
         sta WMAP+$A0,x
         sec
@@ -230,7 +333,8 @@ sram_map:
         dex
         bpl :-
         rts
-@off:   lda #0
+.endif
+@off:   lda #0                  ; cached: pages are mapped on first access
         ldx #31
 :       sta RMAP+$A0,x
         sta WMAP+$A0,x
@@ -406,15 +510,10 @@ set_bank_lo:
         jmp bank_lo_changed
 @r:     rts
 
-; Select cartridge RAM bank A. sram_cur tracks which bank is in C64 memory.
+; Select cartridge RAM bank A (cached pages are tagged per bank).
 set_ram_bank:
-        sta ram_bank
-        cmp #8
-        bcs @r                  ; MBC3 RTC register: no memory swap
-        cmp sram_cur
+        cmp ram_bank
         beq @r
-        tax
-        lda sram_cur
-        stx sram_cur
-        jmp backend_ram_bank    ; A = old bank, X = new bank
+        sta ram_bank
+        jmp sram_map
 @r:     rts

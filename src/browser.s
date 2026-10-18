@@ -35,10 +35,9 @@ IN_DOWN = 2
 IN_FIRE = 4
 IN_BACK = 8
 
-.segment "BSS"
-cmdbuf:  .res 72
-respbuf: .res 256
-.segment "CODE"
+; Buffers in GB memory that is not used before the emulator starts
+cmdbuf   = VRAM1                ; 72
+respbuf  = VRAM1+$100           ; 256
 
 ; Returns C=1 when a ROM was loaded (or one is assumed to be in the REU).
 browser:

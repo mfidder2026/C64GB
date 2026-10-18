@@ -49,7 +49,7 @@ gb_init:
         ldx #1
         jsr fill_pages
 
-        ; ROM cache slots
+        ; cache slots available in every mode
         ldy #0
         lda #>SLOTS0
 :       sta slot_page,y
@@ -64,10 +64,11 @@ gb_init:
         clc
         adc #1
         iny
-        cpy #NSLOTS
+        cpy #NSLOTS_A
         bne :-
 .endif
-        ldy #NSLOTS-1
+        sty nslots
+        ldy #MAXSLOTS-1
         lda #$FF
 :       sta slot_khi,y
         sta slot_gb,y
@@ -161,6 +162,26 @@ gb_init:
         and bank_msk
         sta bank_hi
 
+        lda #$43                ; $0143 bit 7: Game Boy Color ROM
+        sta ml
+        jsr rd
+        and #$80
+        beq @dmg
+        lda #1
+        sta cgb
+        jsr cgb_init
+        jmp @regs
+@dmg:   ldy nslots              ; DMG: $8000-$9FFF becomes more cache slots
+        lda #>VRAM1
+:       sta slot_page,y
+        clc
+        adc #1
+        iny
+        cmp #>(VRAM1+$2000)
+        bne :-
+        sty nslots
+@regs:
+
         ; CPU registers as left by the DMG boot ROM
         lda #$01
         sta rA
@@ -205,6 +226,30 @@ gb_init:
         lda #$2A
         sta divc+1
 
+        lda cgb                 ; GBC boot ROM leaves A=$11 (games test this)
+        beq :+
+        lda #$11
+        sta rA
+        lda #0
+        sta fh
+        sta fc
+        sta rC
+        lda #$FF
+        sta rD
+        lda #$56
+        sta rE
+        lda #0
+        sta rH
+        lda #$0D
+        sta rL
+:
+.ifdef SRAM_RES
+        lda #>SRAM_RES
+        sta ptr+1
+        lda #0
+        ldx #32
+        jsr fill_pages
+.endif
         lda #2
         sta ppu_mode
         lda #20

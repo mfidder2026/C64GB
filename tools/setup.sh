@@ -2,7 +2,7 @@
 # Fetches and builds everything C64GB needs, inside the project folder:
 #   tools/cc65-src  cc65 (ca65, ld65, sim65) built from source
 #   tools/vice      VICE 3.10 (macOS arm64 build) for visual testing
-#   tests/          Blargg's test ROMs and dmg-acid2
+#   tests/          Blargg's test ROMs, dmg-acid2 and cgb-acid2
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -25,4 +25,6 @@ fi
 mkdir -p tests/roms
 [ -f tests/roms/dmg-acid2.gb ] || curl -L -o tests/roms/dmg-acid2.gb \
     https://github.com/mattcurrie/dmg-acid2/releases/download/v1.0/dmg-acid2.gb
+[ -f tests/roms/cgb-acid2.gbc ] || curl -L -o tests/roms/cgb-acid2.gbc \
+    https://github.com/mattcurrie/cgb-acid2/releases/download/v1.1/cgb-acid2.gbc
 echo "setup complete"

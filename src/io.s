@@ -232,6 +232,9 @@ ppu_adv:
         beq :+
         jsr stat_irq
 :       jsr hblank_hook
+        lda cgb
+        beq @next
+        jsr hdma_hblank
         jmp @next
 @m2:    lda #3                  ; OAM scan -> transfer
         sta ppu_mode
@@ -245,7 +248,7 @@ ppu_adv:
         lda #1
         sta ppu_mode
         lda #114
-        jsr @add
+        jsr @add1
         lda IORAM+$0F
         ora #1
         sta IORAM+$0F
@@ -256,12 +259,21 @@ ppu_adv:
 :       jsr lyc_check
         jsr vblank_hook
         jmp @next
-@m1:    inc ly                  ; vblank line
+@m1:    lda dspeed              ; double speed: a line is 2 x 114 CPU cycles
+        beq :+
+        lda vb_half
+        eor #1
+        sta vb_half
+        beq :+
+        lda #114
+        jsr @add1
+        jmp @next
+:       inc ly                  ; vblank line
         lda ly
         cmp #154
         beq @frame
         lda #114
-        jsr @add
+        jsr @add1
         jsr lyc_check
         jmp @next
 @frame: lda #0
@@ -277,7 +289,10 @@ ppu_adv:
 :       jsr lyc_check
 @next:  lda ppu_left
         jmp @chk
-@add:   clc
+@add:   ldx dspeed              ; mode lengths double in CPU cycles
+        beq @add1
+        asl
+@add1:  clc
         adc ppu_left
         sta ppu_left
         rts
@@ -310,7 +325,12 @@ io_read_x:
         beq @tima
         cpx #$0F
         beq @if
-        lda IORAM,x
+        cpx #$4D
+        bcc :+
+        lda cgb
+        beq :+
+        jmp cgb_io_read
+:       lda IORAM,x
         rts
 @ly:    jsr sync
         lda ly
@@ -399,6 +419,11 @@ io_write_x:
         jmp palette_write
 :       cpx #$FF
         beq @ie
+        cpx #$4D
+        bcc @store
+        ldy cgb
+        beq @store
+        jmp cgb_io_write
 @store: sta IORAM,x
 @r:     rts
 @low:   cpx #$0F
@@ -511,9 +536,8 @@ oam_dma:
         tax
         lda RMAP,x
         bne :+
-        cpx #$80
-        bcs @r                  ; unmapped source
-        jsr rom_miss
+        jsr map_page
+        beq @r                  ; unmapped source
 :       sta ptr+1
         lda #0
         sta ptr

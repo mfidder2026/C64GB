@@ -183,7 +183,9 @@ backend_load_page:
         ldx #1
         jmp PV_READ
 
-backend_ram_bank:
+backend_store_page:             ; no cached cartridge RAM in sim65
+backend_wram_bank:              ; GBC WRAM banks are not swapped in sim65
+backend_wram_clear:
         rts
 
 serial_out:
@@ -219,6 +221,9 @@ vblank_hook:
 
 ; Test finished: print the GB cycle count and exit.
 sim_done:
+.ifdef DUMP
+        jsr dump
+.endif
         lda #<msg_done
         ldx #>msg_done
         jsr puts
@@ -255,6 +260,47 @@ trace_lcdc:                     ; prints "ly:value " (value on stack above retur
         jmp write_out
 .endif
 
+.ifdef DUMP
+dump:                           ; palram, pal_c64, pal_scr/col, screen + color row 10
+        lda #<palram
+        ldx #>palram
+        ldy #128
+        jsr hexdump
+        lda #<pal_c64
+        ldx #>pal_c64
+        ldy #80
+        jsr hexdump
+        lda #<(SCREEN+13*40)
+        ldx #>(SCREEN+13*40)
+        ldy #40
+        jsr hexdump
+        lda #<(COLRAM+13*40)
+        ldx #>(COLRAM+13*40)
+        ldy #40
+        jsr hexdump
+        lda #<(cellattr)
+        ldx #>(cellattr)
+        ldy #40
+hexdump:
+        sta ptr2
+        stx ptr2+1
+        sty etmp2
+        ldy #0
+:       sty frames
+        lda (ptr2),y
+        jsr puthex
+        ldy frames
+        iny
+        cpy etmp2
+        bne :-
+        lda #10
+        sta hexbuf
+        lda #<hexbuf
+        ldx #>hexbuf
+        ldy #1
+        jmp write_out
+.endif
+
 sim_illegal:
         lda #<msg_ill
         ldx #>msg_ill
@@ -270,6 +316,7 @@ sim_illegal:
 .include "mem.s"
 .include "io.s"
 .include "init.s"
+.include "cgb.s"
 .ifdef RENDER
 .include "render.s"
 .endif

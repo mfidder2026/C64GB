@@ -62,9 +62,36 @@ flowchart LR
 | 6 | Sound via SID | Recognisable music | |
 | 7 | Cartridge RAM saves via `SAVE_REU`, basic MBC3 RTC | Games can save | |
 | 8 | Accurate STAT/mode-3 timing | Raster-effect games correct | |
-| 9 | (Optional) Game Boy Color | Colours approximated with the 16 C64 colours | |
+| 9 | Game Boy Color | Colours approximated with the 16 C64 colours | ✅ first version (µCity, cgb-acid2) |
 
-## 4. Risks / to be measured on real hardware
+## 4. C64 memory map
+
+| Range | Use |
+|---|---|
+| `$0200-$03FF` | RMAP / WMAP page tables |
+| `$0400-$07FF` | cache slot tables, GBC palette tables (the ROM browser's text screen before emulation) |
+| `$0801-$3FFF` | code, dispatch tables, GBC conversion tables |
+| `$4000-$5FFF` | VRAM bank 0 |
+| `$6000-$7FFF` | WRAM (`$7000` = switchable GBC bank, swapped with the REU at `$FC0000`) |
+| `$8000-$9FFF` | GBC: VRAM bank 1 / DMG: 32 extra cache slots |
+| `$A000-$BFFF`, `$C300-$CFFF` | page cache (ROM pages and cartridge RAM pages with write-back to `$FE0000`) |
+| `$C000-$C2FF` | I/O registers + HRAM, OAM, `$FF` page |
+| `$D000-$D3FF` | VIC screen matrix (RAM under I/O) |
+| `$D400-$DFFF` | renderer tables (RAM under I/O; the renderer runs with I/O switched off) |
+| `$E000-$FF3F` | multicolor bitmap |
+
+## 5. Game Boy Color colour model
+
+Each 15-bit GBC colour is converted to the nearest C64 colour (weighted RGB distance,
+Colodore palette). BG palette 0 colour 0 becomes the global background (`$D021`). For
+every BG palette each distinct colour gets a bit pair: colours equal to the background
+use `%00`, the others take the cell's screen RAM nibbles and colour RAM. A fourth
+distinct colour is merged into the nearest one. Each palette has its own conversion
+table (bitplanes → packed pixels), so the inner loop stays a table lookup. Cell colours
+are written on the first line of every cell row. Sprite colours are mapped through a
+precomputed table to the closest of the four colours of the cell under the pixel.
+
+## 6. Risks / to be measured on real hardware
 
 1. **REU DMA speed in turbo mode**: does DMA run at 1 MHz or faster? Determines the
    cost of a cache miss (256 bytes).
@@ -73,7 +100,7 @@ flowchart LR
 3. **Bank-switch-heavy games** (e.g. Pokémon): the cache lookup should become hash based.
 4. Timing-sensitive games (mid-scanline effects) need milestone 8.
 
-## 5. Measurements (sim65, `make bench`)
+## 7. Measurements (sim65, `make bench`)
 
 | Situation | C64 cycles per GB cycle | 48 MHz | 64 MHz |
 |---|---|---|---|
@@ -81,6 +108,7 @@ flowchart LR
 | CPU heavy, every frame rendered | 76.7 | 60% | 80% |
 | dmg-acid2 (many sprites), every frame | 62.7 | 73% | 97% |
 | Libbet, every frame | 69.1 | 66% | 88% |
+| cgb-acid2 (GBC mode), every frame | 82.7 | 55% | 74% |
 
 The C64 build renders every 2nd frame by default, so real figures sit in between.
 Biggest wins for milestone 5: threaded dispatch (fetch + dispatch inside every handler),

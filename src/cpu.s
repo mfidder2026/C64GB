@@ -41,15 +41,9 @@ pc_resolve:
         ldx pc_page
         lda RMAP,x
         bne @set
-        cpx #$80
-        bcc @rom
-        cpx #$FF
-        bne @ff
-        lda #>IORAM             ; code in HRAM (e.g. the OAM DMA routine)
+        jsr map_page            ; ROM / cartridge RAM / HRAM
         bne @set
-@ff:    lda #>FFPG
-        bne @set
-@rom:   jsr rom_miss
+        lda #>FFPG              ; unmapped: reads $FF
 @set:   sta pcb+1
         rts
 
@@ -299,7 +293,8 @@ op_0F:  lda rA                                  ; RRCA
         sta rA
         jmp rot_a_flags
 
-op_10:  FETCH                                   ; STOP (treated as NOP)
+op_10:  FETCH                                   ; STOP: GBC speed switch, else NOP
+        jsr cgb_stop
         NEXT
 op_11:  LDRR16 rE, rD
 op_12:  lda rE                                  ; LD (DE),A

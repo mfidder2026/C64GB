@@ -1,21 +1,21 @@
 # C64GB
 
-**A Game Boy emulator for the Commodore 64 Ultimate, written entirely in 6502 assembly.**
+**A Game Boy and Game Boy Color emulator for the Commodore 64 Ultimate, written entirely in 6502 assembly.**
 
-C64GB runs original Game Boy (DMG) ROMs on a Commodore 64. It uses the turbo CPU
-modes of the Commodore 64 Ultimate and its 16 MB RAM Expansion Unit. A built-in file
-browser loads `.gb` files straight from USB or SD through the Ultimate Command
-Interface, so you don't need a PC.
+C64GB runs original Game Boy (`.gb`) and Game Boy Color (`.gbc`) ROMs on a
+Commodore 64. It uses the turbo CPU modes of the Commodore 64 Ultimate and its 16 MB
+RAM Expansion Unit. A built-in file browser loads ROMs straight from USB or SD
+through the Ultimate Command Interface, so you don't need a PC.
 
 <p align="center">
+  <img src="docs/screenshots/ucity-city.png" width="49%" alt="µCity (Game Boy Color) running on C64GB">
   <img src="docs/screenshots/libbet-demo.png" width="49%" alt="Libbet and the Magic Floor running on C64GB">
-  <img src="docs/screenshots/144p-title.png" width="49%" alt="144p Test Suite title screen on C64GB">
 </p>
 
 > Status: early but promising. The CPU core passes Blargg's `cpu_instrs` and
 > `instr_timing` test ROMs. The renderer matches the `dmg-acid2` reference image
-> pixel for pixel. Development so far has used sim65 and VICE. Testing on real
-> C64 Ultimate hardware is the next step.
+> pixel for pixel, and Game Boy Color games run in colour. Development so far has
+> used sim65 and VICE. Testing on real C64 Ultimate hardware is the next step.
 
 ## Screenshots
 
@@ -43,6 +43,28 @@ official `dmg-acid2` reference image (right). In the test, 0 of the 23,040 pixel
   <img src="docs/screenshots/acid2-reference.png" alt="dmg-acid2 reference">
 </p>
 
+### Game Boy Color
+
+Game Boy Color ROMs run in colour. Each GBC colour (15-bit RGB) is converted to the
+nearest of the 16 C64 colours. In multicolor mode every 4×8 cell can show three
+colours of its own plus one shared background colour. For each GBC palette, C64GB
+gives each distinct colour its own slot. Only a palette with four different colours,
+none of them the background, has to merge one colour into its nearest neighbour.
+Sprite colours are mapped onto the colours of the cell they cover.
+
+| | |
+|---|---|
+| ![µCity title](docs/screenshots/ucity-title.png) | ![cgb-acid2](docs/screenshots/cgb-acid2.png) |
+| **µCity** by Antonio Niño Díaz, a city builder for the Game Boy Color | **cgb-acid2**: tile attributes, VRAM banks, flips and priorities |
+
+The 16-colour palette and the 4×8 colour cells limit fidelity. Compare C64GB's
+cgb-acid2 (above) with the reference image:
+
+<p align="center"><img src="docs/screenshots/cgb-acid2-reference.png" alt="cgb-acid2 reference"></p>
+
+The face, outline, eyes, nose and mouth are right. The blue "HELLO WORLD" sprites
+turn grey because blue is not among the colours of the cells they cover.
+
 ## Features
 
 - **LR35902 CPU core**: all 256 opcodes plus the CB prefix, with exact
@@ -56,6 +78,13 @@ official `dmg-acid2` reference image (right). In the test, 0 of the 23,040 pixel
   effects (register changes in the middle of a frame).
 - **ROM browser**: lists folders and `.gb`/`.gbc` files on the Ultimate's USB/SD
   storage and loads the chosen ROM into the REU with `DOS_CMD_LOAD_REU`.
+- **Game Boy Color mode** for GBC and dual-mode ROMs:
+  - 2 VRAM banks and tile attributes (palette, bank, flips, priority)
+  - 8 + 8 colour palettes converted to C64 colours
+  - WRAM banks 1–7, swapped through the REU
+  - general and HBlank DMA (HDMA)
+  - double-speed mode
+- **Cartridge RAM** in the REU, paged through the same cache with write-back.
 - **Joystick and keyboard input.** Press RESTORE to return to the browser.
 
 ## Running it on a Commodore 64 Ultimate
@@ -143,8 +172,10 @@ Measured in sim65 (`make bench`) as C64 cycles per emulated Game Boy machine cyc
 | CPU-heavy test ROM, no rendering | 51.9 | 88% | 117% |
 | CPU-heavy, every frame rendered | 76.7 | 60% | 80% |
 | Libbet, every frame rendered | 69.1 | 66% | 88% |
+| cgb-acid2 (GBC mode), every frame rendered | 82.7 | 55% | 74% |
 
-By default the C64 build renders every second frame. Planned optimisations should
+By default the C64 build renders every second frame. Game Boy Color games that switch
+to double-speed mode need twice the CPU time, so they run at about half speed for now. Planned optimisations should
 bring full speed within reach: threaded opcode dispatch, a pre-converted tile cache,
 and byte-wise sprite masks instead of per-pixel plotting.
 
@@ -157,16 +188,19 @@ and byte-wise sprite masks instead of per-pixel plotting.
 - [ ] Performance work towards full speed
 - [ ] Sound through the SID
 - [ ] Save games to SD (`DOS_CMD_SAVE_REU`)
-- [ ] Game Boy Color support (approximated with the 16 C64 colours)
+- [x] Game Boy Color support (approximated with the 16 C64 colours)
+- [ ] Smarter GBC colour cells: use only the colours a cell actually shows, which frees slots for sprite colours
 
 ## Credits
 
-- Test ROMs: [Blargg's Game Boy tests](https://github.com/retrio/gb-test-roms) and
-  [dmg-acid2](https://github.com/mattcurrie/dmg-acid2) by Matt Currie (MIT).
+- Test ROMs: [Blargg's Game Boy tests](https://github.com/retrio/gb-test-roms),
+  [dmg-acid2](https://github.com/mattcurrie/dmg-acid2) and
+  [cgb-acid2](https://github.com/mattcurrie/cgb-acid2) by Matt Currie (MIT).
 - Homebrew shown in the screenshots:
   [Libbet and the Magic Floor](https://github.com/pinobatch/libbet) by Damian Yerrick (zlib)
   and the [144p Test Suite](https://github.com/pinobatch/240p-test-mini) by Artemio Urbina
-  and Damian Yerrick (GPL-2.0). The ROMs are not included in this repository.
+  and Damian Yerrick (GPL-2.0), and [µCity](https://github.com/AntonioND/ucity) by
+  Antonio Niño Díaz (GPL-3.0). The ROMs are not included in this repository.
 - Toolchain: [cc65](https://github.com/cc65/cc65). Emulator for testing:
   [VICE](https://vice-emu.sourceforge.io/).
 - Hardware documentation: [Ultimate documentation](https://1541u-documentation.readthedocs.io/)

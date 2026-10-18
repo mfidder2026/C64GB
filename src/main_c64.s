@@ -19,7 +19,6 @@ REU_LENLO  = $DF07
 REU_LENHI  = $DF08
 REU_ADDRCTL = $DF0A
 
-SRAM_REU   = $FE            ; REU bank holding the cartridge RAM banks
 
 FRAMESKIP  = 1              ; render every (FRAMESKIP+1)th frame
 
@@ -170,43 +169,74 @@ backend_load_page:
         sta REU_CMD
         rts
 
-; Swap cartridge RAM: A = old bank, X = new bank.
-backend_ram_bank:
-        stx mtmp
-        jsr sram_setup
-        lda #$90                ; C64 -> REU
-        sta REU_CMD
-        lda mtmp
-        jsr sram_setup
-        lda #$91                ; REU -> C64
+; Store C64 page A to REU page key_save (cartridge RAM write-back).
+backend_store_page:
+        sta REU_C64HI
+        lda #0
+        sta REU_C64LO
+        sta REU_LO
+        sta REU_LENLO
+        sta REU_ADDRCTL
+        lda key_save
+        sta REU_MID
+        lda key_save+1
+        sta REU_BANK
+        lda #1
+        sta REU_LENHI
+        lda #$90                ; C64 -> REU, execute now
         sta REU_CMD
         rts
 
-; REU registers for an 8 KB transfer of RAM bank A <-> SRAM.
-sram_setup:
-        pha
-        lsr
-        lsr
-        lsr
-        clc
-        adc #SRAM_REU
-        sta REU_BANK
-        pla
-        asl
-        asl
+; GBC: swap WRAM bank at $7000 (GB $D000): A = old bank, X = new bank.
+backend_wram_bank:
+        stx mtmp
+        jsr @setup
+        lda #$90                ; C64 -> REU
+        sta REU_CMD
+        lda mtmp
+        jsr @setup
+        lda #$91                ; REU -> C64
+        sta REU_CMD
+        rts
+@setup: asl                     ; REU $FC0000 + bank * $1000
         asl
         asl
         asl
         sta REU_MID
+        lda #REU_WRAM
+        sta REU_BANK
         lda #0
         sta REU_LO
         sta REU_C64LO
         sta REU_LENLO
         sta REU_ADDRCTL
-        lda #>SRAM
+        lda #>(WRAM+$1000)
         sta REU_C64HI
-        lda #$20
+        lda #$10
         sta REU_LENHI
+        rts
+
+; GBC: zero the REU WRAM bank area ($FC0000-$FC7FFF).
+backend_wram_clear:
+        lda #0
+        sta etmp
+        lda #<etmp
+        sta REU_C64LO
+        lda #>etmp
+        sta REU_C64HI
+        lda #0
+        sta REU_LO
+        sta REU_MID
+        sta REU_LENLO
+        lda #$80
+        sta REU_LENHI
+        sta REU_ADDRCTL         ; fix C64 address
+        lda #REU_WRAM
+        sta REU_BANK
+        lda #$90
+        sta REU_CMD
+        lda #0
+        sta REU_ADDRCTL
         rts
 
 ; Zero the REU cartridge RAM area (128 KB) from a fixed zero byte.
@@ -225,7 +255,7 @@ sram_clear:
         sta REU_LENHI           ; length 0 = 64 KB
         txa
         clc
-        adc #SRAM_REU
+        adc #REU_SRAM
         sta REU_BANK
         lda #$80                ; fix C64 address
         sta REU_ADDRCTL
@@ -360,6 +390,7 @@ autokey_tab:
 .include "mem.s"
 .include "io.s"
 .include "init.s"
+.include "cgb.s"
 .include "render.s"
 .include "browser.s"
 .include "tables.s"

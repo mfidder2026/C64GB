@@ -4,31 +4,63 @@
 ; Each GB tile row (8 pixels, 2 bitplanes) becomes 2 bitmap bytes of 4
 ; double-wide pixels. GB line y lives in bitmap cell row (y/8)+3, so the
 ; 144 GB lines are centred in the 200 bitmap lines.
-; Bit pair value = GB shade: 0 white ($D021), 1 light grey (screen hi nibble),
-; 2 dark grey (screen lo nibble), 3 black (color RAM).
+;
+; DMG: bit pair = shade: 0 white ($D021), 1 light grey (screen hi nibble),
+;      2 dark grey (screen lo nibble), 3 black (color RAM).
+; GBC: bit pair = color index within the tile's palette. Colors 1-3 of the
+;      palette go into the cell's screen/color RAM, color 0 is the global
+;      background ($D021 = BG palette 0 color 0). Colors are per 4x8 cell, so
+;      tiles of different palettes within one cell row share the colors of the
+;      cell's first line ("attribute clash").
+;
+; The tables live in RAM under the I/O area; the renderer runs with I/O off.
 ; ---------------------------------------------------------------------------
 
+conv     = RTAB+$000    ; (hi nibble << 4 | lo nibble) -> 4 packed pixels
+shr4     = RTAB+$100
+shl4     = RTAB+$200    ; also (tile << 4) & $F0
+rev      = RTAB+$300    ; bit reversal (X flip)
+thi_u    = RTAB+$400    ; tile data page, $8000 addressing
+thi_s    = RTAB+$500    ; tile data page, $8800 (signed) addressing
+line_lo  = RTAB+$600    ; 144
+line_hi  = RTAB+$690    ; 144
+xoff_lo  = RTAB+$720    ; 160
+xoff_hi  = RTAB+$7C0    ; 160
+finebuf  = RTAB+$860    ; 21*16
+spr_list = RTAB+$9B0    ; 10
+shade4   = RTAB+$9BC    ; 4
+dist16   = RTAB+$9C0    ; 16x16 C64 color distances
+cellattr = RTAB+$AC0    ; 40: BG attributes of the current cell row (GBC)
+lattr    = RTAB+$AE8    ; 21: BG attributes of the current line, per column
+palprev  = RTAB+$B40    ; 128: palette RAM at the last conversion
+                        ; end: RTAB+$BC0
 
+VRAM1OFS = >VRAM1 - >VRAM
 
 .segment "BSS"
-conv:     .res 256      ; (hi nibble << 4 | lo nibble) -> 4 packed pixels
-shr4:     .res 256
-shl4:     .res 256
-rev:      .res 256      ; bit reversal (sprite X flip)
-tlo:      .res 256      ; (tile << 4) & $F0
-thi_u:    .res 256      ; tile data page, $8000 addressing
-thi_s:    .res 256      ; tile data page, $8800 (signed) addressing
-line_lo:  .res 144
-line_hi:  .res 144
-xoff_lo:  .res 160
-xoff_hi:  .res 160
-spr_list: .res 10
-finebuf:  .res 21*16
-shade4:   .res 4
+convp:    .res 8*256    ; GBC: conv table per BG palette (color -> bit pair)
+palmap:   .res 8        ; GBC: color -> bit pair mapping byte per BG palette
+palmapc:  .res 8        ; mapping the conv table was built for
+colbuf:   .res 40       ; color RAM bytes (read while I/O is on)
 .segment "CODE"
+
+.macro IO_OFF
+.ifdef TARGET_C64
+        lda #$34
+        sta $01
+.endif
+.endmacro
+
+.macro IO_ON
+.ifdef TARGET_C64
+        lda #$35
+        sta $01
+.endif
+.endmacro
 
 ; Build the static lookup tables.
 render_init:
+        IO_OFF
         ldx #0
 @t:     txa
         lsr
@@ -42,7 +74,6 @@ render_init:
         asl
         asl
         sta shl4,x
-        sta tlo,x
         txa                     ; bit reverse
         ldy #8
 :       lsr
@@ -131,6 +162,8 @@ render_init:
         cpx #160
         bne @x
 
+        jsr color_init
+        IO_ON
         lda #1
         sta r_on
         lda IORAM+$47
@@ -138,10 +171,15 @@ render_init:
         sta bgp_cache           ; force a conversion table build
         rts
 
-; Rebuild conv[] for the palette in BGP.
+; Rebuild conv[] for the 2-bit-per-color palette in A (BGP format).
 build_conv:
-        lda IORAM+$47
         sta bgp_cache
+        ldx #<conv
+        stx r_pc
+        ldx #>conv
+        stx r_pc+1
+; Same into the table at r_pc.
+build_conv_to:
         ldy #0
 :       pha
         and #3
@@ -185,7 +223,10 @@ build_conv:
         sta r_t
         dec r_px
         bne @p
-        sta conv,x
+        txa
+        tay
+        lda r_t
+        sta (r_pc),y
         inx
         bne @e
         rts
@@ -195,11 +236,28 @@ hblank_hook:
         lda r_on
         bne :+
         rts
-:       lda IORAM+$47
-        cmp bgp_cache
+:       IO_OFF
+        jsr render_line
+        IO_ON
+        rts
+
+render_line:
+        lda cgb
+        beq @dmgpal
+        lda pal_dirty
         beq :+
+        jsr cgb_palettes
+:       lda #$E4                ; GBC: bit pair = color index
+        cmp bgp_cache
+        beq @pal
         jsr build_conv
-:       ldx ly
+        jmp @pal
+@dmgpal:
+        lda IORAM+$47
+        cmp bgp_cache
+        beq @pal
+        jsr build_conv
+@pal:   ldx ly
         lda line_lo,x
         sta r_dst
         sta r_line
@@ -218,6 +276,8 @@ hblank_hook:
         ldx #>thi_s
 :       sta col_thi+1
         stx col_thi+2
+        sta cgb_thi+1
+        stx cgb_thi+2
 
         ; window start column
         lda #20
@@ -240,6 +300,8 @@ hblank_hook:
         lsr
         sta r_wcol
 @nowin:
+        lda cgb                 ; on GBC, LCDC bit 0 only affects priority
+        bne @bg
         lda IORAM+$40
         and #1
         bne @bg
@@ -304,7 +366,7 @@ hblank_hook:
 :       jsr draw_cols_fine
 @win:   lda r_wcol
         cmp #20
-        bcs @sprites
+        bcs @colors
         sta r_col
         lda #20
         sta r_end
@@ -335,6 +397,13 @@ hblank_hook:
         jsr draw_cols
         inc r_winln
 
+@colors:
+        lda cgb                 ; GBC: set the cell colors on a cell row's first line
+        beq @sprites
+        lda ly
+        and #7
+        bne @sprites
+        jsr commit_colors
 @sprites:
         lda IORAM+$40
         and #2
@@ -358,10 +427,13 @@ draw_cols:
         plp
         adc #0
         sta r_dst+1
+        lda cgb
+        beq dc_col
+        jmp draw_cols_cgb
 dc_col: ldy r_mx
         lda (r_map),y
         tax
-        lda tlo,x
+        lda shl4,x
         ora r_fine
         sta r_tp
 col_thi:
@@ -373,7 +445,7 @@ col_thi:
         iny
         lda (r_tp),y
         sta r_hi
-        and #$F0                ; left 4 pixels
+dc_put: and #$F0                ; left 4 pixels
         ldx r_lo
         ora shr4,x
         tax
@@ -390,6 +462,7 @@ col_thi:
         lda conv,x
         ldy #8
         sta (r_dst),y
+dc_next:
         clc
         lda r_dst
         adc #16
@@ -404,8 +477,84 @@ col_thi:
         inc r_col
         lda r_col
         cmp r_end
-        bne dc_col
+        bne :+
         rts
+:       lda cgb
+        beq dc_col
+        ; fall through
+
+; GBC column: tile attributes from VRAM bank 1 (palette, bank, flips).
+draw_cols_cgb:
+        ldy r_mx
+        lda r_map+1
+        clc
+        adc #VRAM1OFS
+        sta r_amap+1
+        lda r_map
+        sta r_amap
+        lda (r_amap),y
+        sta r_a
+        ldx r_col
+        sta lattr,x
+        lda (r_map),y
+        tax
+        lda r_fine
+        bit r_a                 ; Y flip: row 7 - row
+        bvc :+
+        eor #$0E
+:       ora shl4,x
+        sta r_tp
+cgb_thi:
+        lda thi_u,x
+        sta r_tp+1
+        lda r_a                 ; bit 3: tile data in VRAM bank 1
+        and #$08
+        beq :+
+        lda r_tp+1
+        clc
+        adc #VRAM1OFS
+        sta r_tp+1
+:       ldy #0
+        lda (r_tp),y
+        sta r_lo
+        iny
+        lda (r_tp),y
+        sta r_hi
+        lda r_a                 ; X flip
+        and #$20
+        beq :+
+        ldx r_lo
+        lda rev,x
+        sta r_lo
+        ldx r_hi
+        lda rev,x
+        sta r_hi
+:       lda r_a                 ; conv table of this tile's palette
+        and #7
+        clc
+        adc #>convp
+        sta r_pc+1
+        lda #<convp
+        sta r_pc
+        lda r_hi                ; left 4 pixels
+        and #$F0
+        ldx r_lo
+        ora shr4,x
+        tay
+        lda (r_pc),y
+        ldy #0
+        sta (r_dst),y
+        ldx r_hi                ; right 4 pixels
+        lda shl4,x
+        sta r_t
+        lda r_lo
+        and #$0F
+        ora r_t
+        tay
+        lda (r_pc),y
+        ldy #8
+        sta (r_dst),y
+        jmp dc_next
 
 ; Background with fine horizontal scroll (SCX & 7 != 0): draw one extra tile
 ; into a scratch line with the same layout as the bitmap (byte i at offset 8*i),
@@ -474,6 +623,72 @@ draw_cols_fine:
         bne @b
         rts
 
+; GBC: write the colors of the current cell row (screen RAM + color RAM).
+commit_colors:
+        lda ly                  ; r_tp = cell row * 40
+        lsr
+        lsr
+        lsr
+        clc
+        adc #TOP_ROW
+        sta r_t
+        lda #0
+        sta r_tp+1
+        lda r_t
+        asl
+        asl
+        asl                     ; row * 8 (row < 32)
+        sta r_lo
+        asl
+        rol r_tp+1
+        asl
+        rol r_tp+1              ; row * 32
+        clc
+        adc r_lo
+        sta r_tp
+        bcc :+
+        inc r_tp+1
+:       clc                     ; screen matrix
+        lda r_tp
+        adc #<SCREEN
+        sta r_dst
+        lda r_tp+1
+        adc #>SCREEN
+        sta r_dst+1
+        ldy #39
+@c:     tya
+        lsr
+        tax
+        lda lattr,x
+        sta cellattr,y
+        and #7
+        tax
+        lda pal_scr,x
+        sta (r_dst),y
+        lda pal_col,x
+        sta colbuf,y
+        dey
+        bpl @c
+        clc                     ; color RAM (needs I/O)
+        lda r_tp
+        adc #<COLRAM
+        sta r_dst
+        lda r_tp+1
+        adc #>COLRAM
+        sta r_dst+1
+        IO_ON
+        ldy #39
+:       lda colbuf,y
+        sta (r_dst),y
+        dey
+        bpl :-
+.ifdef TARGET_C64
+        lda gbg0
+        sta $D021
+.endif
+        IO_OFF
+        rts
+
 ; Draw the (max 10) sprites that cover line ly.
 draw_sprites:
         lda IORAM+$40
@@ -509,7 +724,9 @@ draw_sprites:
 @draw:  ldy r_n
         bne :+
         rts
-:       ; stable insertion sort by X: lower X (then lower OAM index) on top
+:       lda cgb                 ; GBC: priority by OAM order only
+        bne @sorted
+        ; DMG: stable insertion sort by X: lower X (then lower OAM index) on top
         lda #1
         sta r_attr              ; i
 @sort:  lda r_attr
@@ -568,14 +785,23 @@ draw_sprites:
         bne :+
         and #$FE
 :       tax
-        lda tlo,x
+        lda shl4,x
         clc
         adc r_fine
         sta r_tp
         lda thi_u,x
         adc #0
         sta r_tp+1
-        ldy #0
+        lda cgb
+        beq :+
+        lda r_attr              ; GBC: bit 3 = tile data in VRAM bank 1
+        and #$08
+        beq :+
+        lda r_tp+1
+        clc
+        adc #VRAM1OFS
+        sta r_tp+1
+:       ldy #0
         lda (r_tp),y
         sta r_lo
         iny
@@ -590,6 +816,15 @@ draw_sprites:
         ldx r_hi
         lda rev,x
         sta r_hi
+:       lda cgb
+        beq :+
+        lda r_attr              ; GBC: near[] row for this OBJ palette
+        and #7
+        asl
+        asl
+        asl
+        sta r_pal
+        jmp @go
 :       lda r_attr
         and #$10
         beq :+
@@ -597,7 +832,7 @@ draw_sprites:
         bne :++
 :       lda IORAM+$48
 :       sta r_pal
-        lda #8
+@go:    lda #8
         sta r_px
 @pix:   lda #0                  ; color = hi bit 7 << 1 | lo bit 7
         asl r_lo
@@ -610,6 +845,10 @@ draw_sprites:
         lda r_x
         cmp #160
         bcs @skip
+        lda cgb
+        bne @cgbpix
+        lda r_attr
+        sta r_prio
         lda r_pal               ; shade = (pal >> 2*color) & 3
 :       lsr
         lsr
@@ -622,9 +861,44 @@ draw_sprites:
         bne @pix
         ldy r_n
         jmp @one
+@cgbpix:
+        sty r_q                 ; color 1-3
+        lda r_x                 ; BG attributes of the cell under the pixel
+        lsr
+        lsr
+        tax
+        lda cellattr,x
+        sta r_prio
+        and #7
+        tax
+        lda palmap,x            ; bit pair of BG color 0 in this cell
+        and #3
+        sta r_bg0
+        txa
+        ora r_pal
+        ldy r_q
+        dey                     ; color 1-3 -> near[] block 0-2
+        beq :++
+:       clc
+        adc #64
+        dey
+        bne :-
+:       tax
+        lda near,x
+        sta r_t
+        lda IORAM+$40           ; LCDC bit 0 clear: sprites always on top
+        and #1
+        bne :+
+        sta r_prio
+        beq :++
+:       lda r_attr
+        ora r_prio
+        sta r_prio
+:       jsr put_pixel
+        jmp @skip
 
-; Plot a sprite pixel: r_x = x, r_t bits 0-1 = shade,
-; r_attr bit 7 = behind background colors 1-3.
+; Plot a sprite pixel: r_x = x, r_t bits 0-1 = bit pair,
+; r_prio bit 7 = only over background color 0.
 put_pixel:
         ldx r_x
         lda xoff_lo,x
@@ -638,7 +912,7 @@ put_pixel:
         and #3
         tax                     ; X = pixel within byte (0 = leftmost)
         ldy #0
-        lda r_attr
+        lda r_prio
         bpl @draw
         lda (r_tp),y            ; behind BG: only over BG color 0
         and pmask,x
@@ -675,3 +949,447 @@ shift_shade:
 
 pmask:     .byte $C0, $30, $0C, $03
 pmask_inv: .byte $3F, $CF, $F3, $FC
+
+; ---------------------------------------------------------------------------
+; GBC colors -> C64 colors
+; ---------------------------------------------------------------------------
+
+; C64 palette (Colodore), 5 bits per component
+c64pal_r: .byte  0,31,16,14,17,10, 5,29,17,10,24, 9,15,21,14,22
+c64pal_g: .byte  0,31, 6,25, 7,21, 5,30,10, 7,13, 9,15,31,13,22
+c64pal_b: .byte  0,31, 7,25,18, 9,19,14, 5, 0,14, 9,15,19,29,22
+
+color_init:
+        ldx #15
+:       lda c64pal_r,x
+        sta c64rgb,x
+        lda c64pal_g,x
+        sta c64rgb+16,x
+        lda c64pal_b,x
+        sta c64rgb+32,x
+        dex
+        bpl :-
+        lda #0                  ; squares 0..31: (n+1)^2 = n^2 + 2n + 1
+        sta n_d
+        sta n_d+1
+        ldx #0
+@sq:    lda n_d
+        sta sqtab_lo,x
+        lda n_d+1
+        sta sqtab_hi,x
+        txa
+        asl
+        sec
+        adc n_d
+        sta n_d
+        bcc :+
+        inc n_d+1
+:       inx
+        cpx #32
+        bne @sq
+        ; dist16[a*16+b] = distance >> 6
+        lda #0
+        sta n_i
+@a:     lda n_i
+        lsr
+        lsr
+        lsr
+        lsr
+        tax
+        lda c64rgb,x
+        sta n_r
+        lda c64rgb+16,x
+        sta n_g
+        lda c64rgb+32,x
+        sta n_b
+        lda n_i
+        and #15
+        tax
+        jsr color_dist
+        lda n_d+1               ; >> 6
+        sta n_t
+        lda n_d
+        asl
+        rol n_t
+        asl
+        rol n_t
+        ldx n_i
+        lda n_t
+        sta dist16,x
+        inc n_i
+        bne @a
+        ldx #127                ; force a full palette conversion
+        lda #0
+:       sta palprev,x
+        dex
+        bpl :-
+        ldx #7                  ; GBC conv tables start as identity mappings
+@cv:    stx n_i
+        lda #<convp
+        sta r_pc
+        txa
+        clc
+        adc #>convp
+        sta r_pc+1
+        lda #$E4
+        sta palmapc,x
+        sta palmap,x
+        jsr build_conv_to
+        ldx n_i
+        dex
+        bpl @cv
+        rts
+
+; n_d = 2*dr^2 + 4*dg^2 + 3*db^2 between n_r/n_g/n_b and C64 color X.
+color_dist:
+        lda n_r
+        sec
+        sbc c64rgb,x
+        bcs :+
+        eor #$FF
+        adc #1
+:       tay
+        lda sqtab_lo,y
+        asl
+        sta n_d
+        lda sqtab_hi,y
+        rol
+        sta n_d+1
+        lda n_g
+        sec
+        sbc c64rgb+16,x
+        bcs :+
+        eor #$FF
+        adc #1
+:       tay
+        lda sqtab_lo,y
+        sta n_t
+        lda sqtab_hi,y
+        asl n_t
+        rol
+        asl n_t
+        rol
+        sta n_t+1
+        clc
+        lda n_d
+        adc n_t
+        sta n_d
+        lda n_d+1
+        adc n_t+1
+        sta n_d+1
+        lda n_b
+        sec
+        sbc c64rgb+32,x
+        bcs :+
+        eor #$FF
+        adc #1
+:       tay
+        lda sqtab_lo,y
+        sta n_t
+        lda sqtab_hi,y
+        sta n_t+1
+        asl n_t                 ; 2*db^2 ...
+        rol n_t+1
+        clc
+        lda sqtab_lo,y          ; ... + db^2
+        adc n_t
+        sta n_t
+        lda sqtab_hi,y
+        adc n_t+1
+        sta n_t+1
+        clc
+        lda n_d
+        adc n_t
+        sta n_d
+        lda n_d+1
+        adc n_t+1
+        sta n_d+1
+        rts
+
+; Convert changed palette entries to C64 colors and rebuild the derived
+; tables (screen/color RAM bytes per BG palette, sprite color mapping).
+cgb_palettes:
+        lda #0
+        sta pal_dirty
+        ldx #0                  ; X = palram offset (2 bytes per color)
+@e:     lda palram,x
+        cmp palprev,x
+        bne @conv
+        lda palram+1,x
+        cmp palprev+1,x
+        beq @nx
+@conv:  lda palram,x
+        sta palprev,x
+        and #$1F
+        sta n_r
+        lda palram+1,x
+        sta palprev+1,x
+        lsr
+        lsr
+        and #$1F
+        sta n_b
+        lda palram+1,x          ; g = bits 5-9
+        and #3
+        sta n_g
+        lda palram,x
+        lsr
+        lsr
+        lsr
+        lsr
+        lsr
+        asl n_g
+        asl n_g
+        asl n_g
+        ora n_g
+        sta n_g
+        stx n_i
+        jsr nearest
+        lda n_i
+        lsr
+        tax
+        lda n_bc
+        sta pal_c64,x
+        ldx n_i
+@nx:    inx
+        inx
+        bpl @e
+
+        lda pal_c64             ; global background = BG palette 0, color 0
+        sta gbg0
+        jsr assign_palettes
+
+        ; near[(k-1)*64 + obj*8 + bg] = bit pair whose cell color is closest
+        ; to color k of OBJ palette obj, with BG palette bg in the cell
+        ldx #191
+@n:     stx n_i
+        txa
+        and #7
+        asl
+        asl
+        sta n_t                 ; bg * 4
+        txa
+        lsr
+        lsr
+        lsr
+        and #7
+        asl
+        asl
+        sta n_t+1               ; obj * 4
+        txa
+        rol
+        rol
+        rol
+        and #3                  ; k - 1
+        clc
+        adc #1
+        adc n_t+1
+        tay
+        lda pal_c64+32,y        ; target color
+        asl
+        asl
+        asl
+        asl
+        sta n_r                 ; dist16 row
+        lda gbg0                ; candidate 0: global background
+        ora n_r
+        tay
+        lda dist16,y
+        sta n_bd
+        lda #0
+        sta n_bc
+        lda #1
+        sta n_b
+@cand:  lda n_t                 ; bg * 4 -> bg
+        lsr
+        lsr
+        tay
+        lda n_b
+        cmp #2
+        beq @c2
+        bcs @c3
+        lda pal_scr,y           ; bit pair 1: screen RAM high nibble
+        lsr
+        lsr
+        lsr
+        lsr
+        jmp @cc
+@c2:    lda pal_scr,y           ; bit pair 2: screen RAM low nibble
+        and #15
+        jmp @cc
+@c3:    lda pal_col,y           ; bit pair 3: color RAM
+@cc:    ora n_r
+        tay
+        lda dist16,y
+        cmp n_bd
+        bcs :+
+        sta n_bd
+        lda n_b
+        sta n_bc
+:       inc n_b
+        lda n_b
+        cmp #4
+        bne @cand
+        ldx n_i
+        lda n_bc
+        sta near,x
+        dex
+        cpx #$FF
+        bne @n
+        rts
+
+; n_bc = C64 color nearest to n_r/n_g/n_b.
+nearest:
+        lda #$FF
+        sta n_bd
+        sta n_bd+1
+        ldx #15
+@c:     jsr color_dist
+        lda n_d+1
+        cmp n_bd+1
+        bcc @better
+        bne @nx
+        lda n_d
+        cmp n_bd
+        bcs @nx
+@better:
+        lda n_d
+        sta n_bd
+        lda n_d+1
+        sta n_bd+1
+        stx n_bc
+@nx:    dex
+        bpl @c
+        rts
+
+; For each BG palette, give every distinct color its own bit pair: colors equal
+; to the global background use 0, the others get the cell's three colors. A
+; fourth distinct color is merged into the nearest of those.
+assign_palettes:
+        ldx #7
+@p:     stx n_i
+        lda #0
+        sta n_b                 ; slots used
+        sta n_bc                ; mapping byte
+        sta n_t                 ; slot colors 1-3 (n_t, n_t+1, n_g)
+        sta n_t+1
+        sta n_g
+        txa
+        asl
+        asl
+        sta n_r                 ; palette * 4
+        lda #3
+        sta n_d                 ; color index i (3..0, built from the top)
+@i:     lda n_r
+        clc
+        adc n_d
+        tay
+        lda pal_c64,y
+        sta n_d+1               ; color
+        ldx #0                  ; bit pair
+        cmp gbg0
+        bne :+
+        jmp @set
+:       inx
+        cmp n_t
+        bne :+
+        ldy n_b
+        bne @set
+:       inx
+        cmp n_t+1
+        bne :+
+        ldy n_b
+        cpy #2
+        bcs @set
+:       inx
+        cmp n_g
+        bne :+
+        ldy n_b
+        cpy #3
+        bcs @set
+:       ldx n_b                 ; new color: next free slot
+        cpx #3
+        bcs @merge
+        inx
+        stx n_b
+        lda n_d+1
+        cpx #1
+        bne :+
+        sta n_t
+        jmp @set
+:       cpx #2
+        bne :+
+        sta n_t+1
+        jmp @set
+:       sta n_g
+        jmp @set
+@merge: lda n_d+1               ; all slots taken: nearest of bg / slots
+        asl
+        asl
+        asl
+        asl
+        sta n_bd+1
+        ora gbg0
+        tay
+        lda dist16,y
+        sta n_bd
+        ldx #0
+        lda n_t
+        ora n_bd+1
+        tay
+        lda dist16,y
+        cmp n_bd
+        bcs :+
+        sta n_bd
+        ldx #1
+:       lda n_t+1
+        ora n_bd+1
+        tay
+        lda dist16,y
+        cmp n_bd
+        bcs :+
+        sta n_bd
+        ldx #2
+:       lda n_g
+        ora n_bd+1
+        tay
+        lda dist16,y
+        cmp n_bd
+        bcs @set
+        ldx #3
+@set:   txa                     ; mapping = mapping << 2 | bit pair
+        asl n_bc
+        asl n_bc
+        ora n_bc
+        sta n_bc
+        dec n_d
+        bmi :+
+        jmp @i
+:       ldx n_i
+        lda n_t
+        asl
+        asl
+        asl
+        asl
+        ora n_t+1
+        sta pal_scr,x
+        lda n_g
+        sta pal_col,x
+        lda n_bc
+        sta palmap,x
+        cmp palmapc,x           ; rebuild the conv table if the mapping changed
+        beq :+
+        sta palmapc,x
+        pha
+        lda #<convp
+        sta r_pc
+        txa
+        clc
+        adc #>convp
+        sta r_pc+1
+        pla
+        jsr build_conv_to
+:       ldx n_i
+        dex
+        bmi :+
+        jmp @p
+:       rts

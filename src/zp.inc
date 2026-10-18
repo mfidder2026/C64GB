@@ -117,4 +117,32 @@ r_bg0   = $6F           ; shade of BG color 0 (for sprite priority)
 r_q     = $54           ; scratch
 
 
+; GBC state and misc
+nslots   = $70          ; cache slots in use
+cgb      = $71          ; 1 = running in Game Boy Color mode
+dspeed   = $72          ; 1 = CGB double speed
+vbk      = $73          ; VRAM bank (0/1)
+svbk     = $74          ; WRAM bank at $D000 (1-7)
+hdma_src = $75          ; 2 bytes
+hdma_dst = $77          ; 2 bytes
+hdma_len = $79          ; HBlank DMA blocks left - 1 ($FF = inactive)
+pal_dirty = $7A         ; GBC palettes changed since the last conversion
+vb_half  = $7B          ; double speed: first half of a VBlank line done
+gbg0     = $7C          ; C64 color used for GBC color 0 (global background)
+key_save = $7D          ; 2 bytes: key of a page being written back
+hptr     = $7F          ; 2 bytes: HDMA source
+hptr2    = $81          ; 2 bytes: HDMA destination
+r_amap   = $83          ; 2 bytes: GBC attribute map row pointer
+r_a      = $85          ; GBC tile attributes
+r_prio   = $86          ; sprite pixel priority (bit 7: behind BG colors 1-3)
+n_r      = $87          ; color conversion
+n_g      = $88
+n_b      = $89
+n_d      = $8A          ; 2 bytes
+n_t      = $8C          ; 2 bytes
+n_bd     = $8E          ; 2 bytes
+n_bc     = $90
+n_i      = $91
+r_pc     = $92          ; 2 bytes: conv table pointer
+
 csp      = $F0          ; cc65 parameter stack pointer (sim65 paravirt)
