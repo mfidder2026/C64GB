@@ -434,6 +434,9 @@ io_read_x:
 ; ---- I/O register writes: X = register ($00-$7F or $FF), A = value ------------
 
 io_write_x:
+.ifdef TRACEIO
+        jsr trace_io
+.endif
         cpx #$40
         bcs :+
         jmp @low

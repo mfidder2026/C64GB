@@ -123,7 +123,14 @@ with a one-entry cache per sprite.
 | Blargg `halt_bug` | pass (VICE, result shown on screen) |
 | Blargg `mem_timing` | fail: memory accesses are modelled at the end of an instruction. Moving reads one cycle earlier broke `instr_timing`, so a per-M-cycle access model is needed. |
 | `interrupt_time` (GBC double speed) | fail, not investigated |
-| µCity status bar | top lines show the map instead of the window. Needs tracing with GBC WRAM banks, which the sim65 build does not emulate. |
+| µCity status bar | renders correctly in sim65 frame dumps (with GBC WRAM banks now emulated there); the cut-off seen in VICE screenshots was a capture taken mid-frame |
+
+Debugging aids in the sim65 build:
+- `-D AUTOKEYS` for scripted input
+- `-D TRACEIO=<frame>`, which logs LCDC, scroll, window and LYC writes with LY and mode
+- `-D FRAMEDUMP` with `-D RENDER`, which writes `frame.bin`; `tools/framedump.py` turns it into a PNG of the C64 screen
+
+GBC WRAM banks are backed by a host file (`wram.bin`).
 
 ## 7b. Risks / to be measured on real hardware
 

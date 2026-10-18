@@ -135,7 +135,7 @@ puthex:
 hexdig: .byte "0123456789ABCDEF"
 
 .segment "BSS"
-hexbuf: .res 2
+hexbuf: .res 3
 .segment "CODE"
 
 ; ---- backend ---------------------------------------------------------------
@@ -184,9 +184,82 @@ backend_load_page:
         jmp PV_READ
 
 backend_store_page:             ; no cached cartridge RAM in sim65
-backend_wram_bank:              ; GBC WRAM banks are not swapped in sim65
-backend_wram_clear:
         rts
+
+; GBC WRAM banks live in the host file "wram.bin" (bank * 4 KB).
+fd_ram  = $56                   ; 2 bytes
+wram_new = $55
+
+; Create wram.bin with 32 KB of zeros (VRAM bank 1, still clear, is the source).
+backend_wram_clear:
+        lda #<wramname          ; open("wram.bin", O_RDWR | O_CREAT | O_TRUNC)
+        ldx #>wramname
+        jsr pushax
+        lda #$33
+        ldx #0
+        jsr pushax
+        ldy #4
+        jsr PV_OPEN
+        sta fd_ram
+        stx fd_ram+1
+        lda #4
+        sta wram_new
+:       lda fd_ram
+        ldx fd_ram+1
+        jsr pushax
+        lda #<VRAM1
+        ldx #>VRAM1
+        jsr pushax
+        lda #0
+        ldx #$20
+        jsr PV_WRITE
+        dec wram_new
+        bne :-
+        rts
+wramname: .byte "wram.bin", 0
+
+; Swap the WRAM bank at $7000: A = old bank, X = new bank.
+backend_wram_bank:
+        stx wram_new
+        jsr @seek
+        lda fd_ram              ; write(fd, $7000, $1000)
+        ldx fd_ram+1
+        jsr pushax
+        lda #<(WRAM+$1000)
+        ldx #>(WRAM+$1000)
+        jsr pushax
+        lda #0
+        ldx #$10
+        jsr PV_WRITE
+        lda wram_new
+        jsr @seek
+        lda fd_ram              ; read(fd, $7000, $1000)
+        ldx fd_ram+1
+        jsr pushax
+        lda #<(WRAM+$1000)
+        ldx #>(WRAM+$1000)
+        jsr pushax
+        lda #0
+        ldx #$10
+        jmp PV_READ
+@seek:  asl                     ; lseek(fd, bank << 12, SEEK_SET)
+        asl
+        asl
+        asl
+        pha
+        lda fd_ram
+        ldx fd_ram+1
+        jsr pushax
+        lda #0
+        tax
+        jsr pushax
+        pla
+        tax
+        lda #0
+        jsr pushax
+        lda #2
+        ldx #0
+        jmp PV_LSEEK
 
 serial_out:
         lda #<(IORAM+1)
@@ -210,6 +283,37 @@ vblank_hook:
         bne :+
         inc frames+1
 :
+.ifdef AUTOKEYS
+        lda #0
+        sta joy_btns
+        sta joy_dirs
+        ldx #0
+@ak:    lda autokey_tab+1,x
+        cmp #$FF
+        beq @akd
+        lda frames
+        sec
+        sbc autokey_tab,x
+        sta etmp
+        lda frames+1
+        sbc autokey_tab+1,x
+        bne @aks
+        lda etmp
+        cmp #6
+        bcs @aks
+        lda joy_btns
+        ora autokey_tab+2,x
+        sta joy_btns
+        lda joy_dirs
+        ora autokey_tab+3,x
+        sta joy_dirs
+@aks:   txa
+        clc
+        adc #4
+        tax
+        bne @ak
+@akd:
+.endif
 .ifdef PROFILE                  ; trace (clock + PC) during frames PROFILE..PROFILE+PROF_N-1
         lda frames
         cmp #<PROFILE
@@ -241,6 +345,9 @@ sim_done:
 .ifdef DUMP
         jsr dump
 .endif
+.ifdef FRAMEDUMP
+        jsr framedump
+.endif
         lda #<msg_done
         ldx #>msg_done
         jsr puts
@@ -256,6 +363,111 @@ sim_done:
         lda #0
         jmp PV_EXIT
 
+.ifdef FRAMEDUMP
+; Write bitmap, screen matrix, color RAM and $D021 color to "frame.bin".
+framedump:
+        lda #<fdname
+        ldx #>fdname
+        jsr pushax
+        lda #$32                ; O_WRONLY | O_CREAT | O_TRUNC
+        ldx #0
+        jsr pushax
+        ldy #4
+        jsr PV_OPEN
+        sta ptr2
+        stx ptr2+1
+        lda #<BITMAP
+        ldx #>BITMAP
+        ldy #>8000
+        jsr @w
+        lda #<SCREEN
+        ldx #>SCREEN
+        ldy #4
+        jsr @w
+        lda #<COLRAM
+        ldx #>COLRAM
+        ldy #4
+        jsr @w
+        lda gbg0
+        sta hexbuf
+        lda #<hexbuf
+        ldx #>hexbuf
+        ldy #0
+@w:     sta ptr                 ; write(fd, A/X, Y * 256 (or 1 when Y = 0))
+        stx ptr+1
+        sty etmp2
+        lda ptr2
+        ldx ptr2+1
+        jsr pushax
+        lda ptr
+        ldx ptr+1
+        jsr pushax
+        lda #0
+        ldx etmp2
+        bne :+
+        lda #1
+:       jmp PV_WRITE
+fdname: .byte "frame.bin", 0
+.endif
+.ifdef AUTOKEYS
+autokey_tab:
+        .include "autokeys.inc"
+        .word $FFFF
+.endif
+.ifdef TRACEIO
+; Print "frame ly mode reg=val" for writes to LCDC/SCY/SCX/LYC/WY/WX.
+trace_io:
+        pha
+        cpx #$40
+        beq :+
+        cpx #$42
+        beq :+
+        cpx #$43
+        beq :+
+        cpx #$45
+        beq :+
+        cpx #$4A
+        beq :+
+        cpx #$4B
+        bne @r
+:       lda frames
+        cmp #<TRACEIO
+        bne @r
+        txa
+        pha
+        tsx
+        lda $0102,x             ; value
+        sta etmp2
+        pla
+        pha
+        sta hexbuf+2            ; (reg kept on the stack)
+        lda ly
+        jsr puthex
+        lda #'/'
+        jsr putch
+        lda ppu_mode
+        jsr puthex
+        lda #' '
+        jsr putch
+        pla
+        pha
+        jsr puthex
+        lda #'='
+        jsr putch
+        lda etmp2
+        jsr puthex
+        lda #10
+        jsr putch
+        pla
+        tax
+@r:     pla
+        rts
+putch:  sta hexbuf
+        lda #<hexbuf
+        ldx #>hexbuf
+        ldy #1
+        jmp write_out
+.endif
 .ifdef TRACE
 trace_lcdc:                     ; prints "ly:value " (value on stack above return)
         lda ly
