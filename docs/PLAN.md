@@ -109,13 +109,23 @@ with a one-entry cache per sprite.
 
 | Situation | C64 cycles per GB cycle | 48 MHz | 64 MHz |
 |---|---|---|---|
-| CPU heavy (Blargg 09), no rendering | 51.9 | 88% | 117% |
-| CPU heavy, every frame rendered | 76.7 | 60% | 80% |
-| dmg-acid2 (many sprites), every frame | 62.7 | 73% | 97% |
-| Libbet, every frame | 69.1 | 66% | 88% |
-| cgb-acid2 (GBC mode, many sprites), every frame | 96.0 | 48% | 64% |
+| CPU heavy (Blargg 09), no rendering | 42.4 | 108% | 144% |
+| CPU heavy, every frame rendered | 64.3 | 71% | 95% |
+| dmg-acid2 (DMG, many sprites), every frame | 60.6 | 76% | 101% |
+| Libbet (GBC mode), every frame | 74.4 | 62% | 82% |
+| cgb-acid2 (GBC mode, many sprites), every frame | 85.7 | 53% | 71% |
 
-The C64 build renders every 2nd frame by default, so real figures sit in between.
-Biggest wins for milestone 5: threaded dispatch (fetch + dispatch inside every handler),
-a pre-converted tile cache for the background, and byte-wise sprite masks instead of
-per-pixel plotting.
+History: the first version measured 51.9 / 76.7 for the CPU-heavy ROM and 62.7–70 for
+dmg-acid2. Round 1 of profiling (`tools/profile.py`) gave these gains:
+- dispatcher in zero page, with the PC as the fetch operand and events checked
+  inside the cycle subtraction
+- stack fast paths
+- column loops with down counters and hoisted setup
+- sprite plotting that walks the bitmap with table-driven shifts, and maps GBC
+  colours lazily per cell
+
+Next candidates:
+- a pre-converted ("packed") tile format so the background loop needs no nibble
+  shuffles; this needs memory
+- adaptive frame skip
+- sprite rows written byte-wise

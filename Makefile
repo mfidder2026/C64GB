@@ -47,3 +47,11 @@ bench: | $(BUILD)
 	$(CA65) -I src -D TARGET_SIM=1 -D SIM_FRAMES=120 -D RENDER=1 -o $(BUILD)/benchr.o src/main_sim.s
 	$(LD65) -C cfg/sim.cfg -o $(BUILD)/benchr.bin $(BUILD)/benchr.o
 	tests/bench.sh "$(BENCH_ROM)"
+
+# Cycle profile per routine: make profile PROFILE_ROM=game.gb [PROFILE_ARGS="60 2 render"]
+PROFILE_ROM ?= tests/roms/dmg-acid2.gb
+PROFILE_ARGS ?= 60 2 render
+profile:
+	python3 tools/profile.py "$(PROFILE_ROM)" $(PROFILE_ARGS)
+
+.PHONY: bench profile

@@ -7,26 +7,45 @@
 
 ; ---- main dispatch loop ---------------------------------------------------
 
+; The dispatcher runs in zero page: the GB PC is the operand of its first
+; instruction (pcl = low byte, pcpg = C64 page), and the handler jump is
+; patched in place with 3-cycle zero page stores.
+.segment "ZPCODE": zeropage
 loop:
-        bit budget
-        bmi @event
-        ldy pcl
-        lda (pcb),y
-        inc pcl
-        beq @cross
-@go:    tax
+        lda a:$0000             ; opcode at PC
+        tax
         lda budget
         sec
         sbc cyctab,x
         sta budget
+        bmi zl_event            ; an event is due before this instruction ends
+zl_go:  inc pcl
+        beq zl_cross
+zl_disp:
         lda optab_lo,x
-        sta @jmp+1
+        sta z:zl_jmp+1
         lda optab_hi,x
-        sta @jmp+2
-@jmp:   jmp $0000
-@cross: jsr pc_cross
-        jmp @go
-@event: jmp do_event
+        sta z:zl_jmp+2
+zl_jmp: jmp $0000
+zl_cross:
+        jmp loop_cross
+zl_event:
+        jmp loop_event
+.assert loop+1 = pcl, error, "pcl must be the dispatcher's operand"
+.segment "CODE"
+
+loop_cross:
+        txa
+        jsr pc_cross
+        tax
+        jmp zl_disp
+loop_event:
+        stx ev_op               ; handle events first (PC still at the opcode)
+        jsr event_pre
+        bcc :+
+        jmp loop                ; interrupt taken: fetch at the new PC
+:       ldx ev_op
+        jmp zl_go
 
 ; PC low byte wrapped: move to the next GB page. Preserves A.
 pc_cross:
@@ -36,7 +55,7 @@ pc_cross:
         pla
         rts
 
-; Point pcb at the C64 page holding GB page pc_page. Clobbers A, X, Y.
+; Point pcpg at the C64 page holding GB page pc_page. Clobbers A, X, Y.
 pc_resolve:
         ldx pc_page
         lda RMAP,x
@@ -44,7 +63,7 @@ pc_resolve:
         jsr map_page            ; ROM / cartridge RAM / HRAM
         bne @set
         lda #>FFPG              ; unmapped: reads $FF
-@set:   sta pcb+1
+@set:   sta pcpg
         rts
 
 ; Jump to the GB address in tmp (lo) / tmp2 (hi).
@@ -62,7 +81,23 @@ goto_t:
 
 ; Push tmp2 (hi) / tmp (lo).
 push16:
+        ldx sp_hi               ; fast path: both bytes in one mapped page
+        ldy WMAP,x
+        beq @slow
         lda sp_lo
+        cmp #2
+        bcc @slow
+        sty mp+1
+        tay
+        dey
+        lda tmp2
+        sta (mp),y
+        dey
+        lda tmp
+        sta (mp),y
+        sty sp_lo
+        rts
+@slow:  lda sp_lo
         bne :+
         dec sp_hi
 :       dec sp_lo
@@ -85,7 +120,24 @@ push16:
 
 ; Pop into tmp (lo) / tmp2 (hi).
 pop16:
-        lda sp_lo
+        ldx sp_hi               ; fast path: both bytes in one mapped page
+        lda RMAP,x
+        beq @slow
+        ldy sp_lo
+        cpy #$FF
+        beq @slow
+        sta mp+1
+        lda (mp),y
+        sta tmp
+        iny
+        lda (mp),y
+        sta tmp2
+        iny
+        sty sp_lo
+        bne :+
+        inc sp_hi
+:       rts
+@slow:  lda sp_lo
         sta ml
         lda sp_hi
         sta mh

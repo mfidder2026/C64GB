@@ -174,15 +174,22 @@ Measured in sim65 (`make bench`) as C64 cycles per emulated Game Boy machine cyc
 
 | Workload | Cycles | at 48 MHz | at 64 MHz |
 |---|---|---|---|
-| CPU-heavy test ROM, no rendering | 51.9 | 88% | 117% |
-| CPU-heavy, every frame rendered | 76.7 | 60% | 80% |
-| Libbet, every frame rendered | 69.1 | 66% | 88% |
-| cgb-acid2 (GBC mode, many sprites), every frame rendered | 96.0 | 48% | 64% |
+| CPU-heavy test ROM, no rendering | 42.4 | 108% | 144% |
+| CPU-heavy, every frame rendered | 64.3 | 71% | 95% |
+| dmg-acid2 (DMG, many sprites), every frame rendered | 60.6 | 76% | 101% |
+| Libbet (GBC mode), every frame rendered | 74.4 | 62% | 82% |
+| cgb-acid2 (GBC, many sprites), every frame rendered | 85.7 | 53% | 71% |
 
-By default the C64 build renders every second frame. Game Boy Color games that switch
-to double-speed mode need twice the CPU time, so they run at about half speed for now. Planned optimisations should
-bring full speed within reach: threaded opcode dispatch, a pre-converted tile cache,
-and byte-wise sprite masks instead of per-pixel plotting.
+By default the C64 build renders every second frame, so real speed sits between the
+two kinds of figures. Game Boy Color games that switch to double-speed mode need twice
+the CPU time.
+
+`tools/profile.py rom.gb [frame] [frames] [render]` traces the emulator in sim65 and
+prints C64 cycles per routine. It is how the hot spots above were found and reduced:
+- a zero page dispatcher, where the GB program counter is the operand of the opcode fetch
+- tighter tile column loops
+- sprite plotting that walks the bitmap instead of recomputing addresses per pixel
+- stack fast paths
 
 ## Roadmap
 
@@ -190,7 +197,8 @@ and byte-wise sprite masks instead of per-pixel plotting.
 - [x] Scanline renderer with sprites and window, pixel-exact on dmg-acid2
 - [x] ROM browser via the Ultimate Command Interface
 - [ ] Testing on real C64 Ultimate hardware
-- [ ] Performance work towards full speed
+- [x] Performance work, round 1 (profiler, dispatcher, renderer, sprites)
+- [ ] Performance work towards full speed (tile cache, adaptive frame skip)
 - [ ] Sound through the SID
 - [ ] Save games to SD (`DOS_CMD_SAVE_REU`)
 - [x] Game Boy Color support (approximated with the 16 C64 colours)

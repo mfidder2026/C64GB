@@ -207,6 +207,20 @@ vblank_hook:
         bne :+
         inc frames+1
 :
+.ifdef PROFILE                  ; trace (clock + PC) during frames PROFILE..PROFILE+PROF_N-1
+        lda frames
+        cmp #<PROFILE
+        bne :+
+        lda #$30
+        sta $FFCB
+:       lda frames
+        cmp #<(PROFILE+PROF_N)
+        bne :+
+        lda #0
+        sta $FFCB
+        jmp sim_done
+:
+.endif
 .if SIM_FRAMES > 0
         lda frames
         cmp #<SIM_FRAMES
@@ -261,7 +275,18 @@ trace_lcdc:                     ; prints "ly:value " (value on stack above retur
 .endif
 
 .ifdef DUMP
-dump:                           ; palram, pal_c64, pal_scr/col, screen + color row 10
+dump:
+.ifdef DUMPBMP
+        lda #<(BITMAP+(66/8+3)*320)     ; cell row of line 66
+        ldx #>(BITMAP+(66/8+3)*320)
+        ldy #255
+        jsr hexdump
+        lda #<OAMPG
+        ldx #>OAMPG
+        ldy #160
+        jmp hexdump
+.endif
+                                ; palram, pal_c64, pal_scr/col, screen + color row 10
         lda #<palram
         ldx #>palram
         ldy #128

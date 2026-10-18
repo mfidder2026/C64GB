@@ -10,8 +10,8 @@
 ; Fetch the byte at GB PC into A and advance PC. Clobbers X, Y.
 .macro FETCH
         .local ok
-        ldy pcl
-        lda (pcb),y
+        ldy #0
+        lda (pcl),y
         inc pcl
         bne ok
         jsr pc_cross

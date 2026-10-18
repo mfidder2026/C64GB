@@ -232,7 +232,7 @@ evict:
         bcc :+
         ldy #0
 :       lda slot_page,y
-        cmp pcb+1
+        cmp pcpg
         beq @again
         sty clock
         ldx slot_khi,y

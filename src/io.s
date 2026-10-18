@@ -74,6 +74,40 @@ do_event:
         jsr schedule
         jmp loop
 
+; Events from the main loop: called after an instruction was fetched and its
+; cycles counted, before it runs. Returns C=1 if an interrupt was taken (the
+; instruction is then fetched again after the handler).
+event_pre:
+        jsr sync
+        lda ei_pend
+        beq @noei
+        cmp #1
+        bne @ei2
+        inc ei_pend             ; EI takes effect after the next instruction
+        lda #0
+        sta budget
+        sta slice
+        clc
+        rts
+@ei2:   lda #0
+        sta ei_pend
+        lda #1
+        sta ime
+@noei:  lda IORAM+$FF
+        and IORAM+$0F
+        and #$1F
+        beq @res
+        ldx ime
+        beq @res
+        jsr service_int
+        jsr schedule
+        CYCLES 5
+        sec
+        rts
+@res:   jsr schedule
+        clc
+        rts
+
 ; A = pending interrupt bits. Dispatch the highest priority one.
 service_int:
         ldx #0

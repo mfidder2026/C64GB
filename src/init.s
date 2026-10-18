@@ -3,6 +3,7 @@
 ; ---------------------------------------------------------------------------
 
 ; Clear the emulator's zero page ($02-$EF).
+.import __ZPCODE_LOAD__, __ZPCODE_RUN__, __ZPCODE_SIZE__
 zp_clear:
         lda #0
         ldx #$02
@@ -26,6 +27,13 @@ fill_pages:
 
 ; Set up memory maps, read the cartridge header and reset the GB state.
 gb_init:
+        ldx #<(__ZPCODE_SIZE__-1)   ; install the zero page dispatcher
+:       lda __ZPCODE_LOAD__,x
+        sta __ZPCODE_RUN__,x
+        dex
+        bpl :-
+        lda #0
+        sta pcl
         lda #0
         tax
 :       sta RMAP,x

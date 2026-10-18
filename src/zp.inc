@@ -23,8 +23,10 @@ fc      = $0D
 sp_lo   = $0E
 sp_hi   = $0F
 
-pcl     = $10           ; GB PC low byte
-pcb     = $11           ; 2 bytes: pointer to C64 page holding the PC page (lo=0)
+; GB PC: pcl/pcpg are the operand of the zero page dispatcher's first
+; instruction (see cpu.s, segment ZPCODE at $BC)
+pcl      = $BD
+pcpg     = $BE
 pc_page = $13           ; GB PC high byte
 
 budget  = $14           ; M-cycles left until next event (signed, event when < 0)
@@ -169,5 +171,13 @@ s_n      = $AA
 s_lcell  = $AB          ; sprite pixel color cache
 s_lcol   = $AC
 s_lbp    = $AD
+r_cnt    = $AE          ; columns left
+r_finef  = $AF          ; tile row offset for Y-flipped tiles
+spal     = $B0          ; sprite color 1-3 -> bit pair (spal+1..spal+3)
+trow     = $B3          ; GBC: dist16 rows of sprite colors 1-3 (trow+1..trow+3)
+r_cellx  = $B7          ; cell of the current sprite pixel
+ev_op    = $BB          ; opcode fetched when an event became due
+
+; $BC-$EF: zero page dispatcher (segment ZPCODE)
 
 csp      = $F0          ; cc65 parameter stack pointer (sim65 paravirt)

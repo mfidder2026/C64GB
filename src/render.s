@@ -436,6 +436,10 @@ draw_cols:
         plp
         adc #0
         sta r_dst+1
+        lda r_end
+        sec
+        sbc r_col
+        sta r_cnt
         lda cgb
         beq dc_col
         jmp draw_cols_cgb
@@ -448,103 +452,94 @@ dc_col: ldy r_mx
 col_thi:
         lda thi_u,x
         sta r_tp+1
-        ldy #0
-        lda (r_tp),y
-        sta r_lo
-        iny
+        ldy #1
         lda (r_tp),y
         sta r_hi
-dc_put: and #$F0                ; left 4 pixels
-        ldx r_lo
+        dey
+        lda (r_tp),y
+        sta r_lo
+        tax                     ; left 4 pixels: hi nibble | lo nibble >> 4
+        lda r_hi
+        and #$F0
         ora shr4,x
         tax
         lda conv,x
-        ldy #0
         sta (r_dst),y
-        ldx r_hi                ; right 4 pixels
-        lda shl4,x
-        sta r_t
-        lda r_lo
+        lda r_lo                ; right 4 pixels: hi << 4 | lo & 15
         and #$0F
-        ora r_t
+        ldx r_hi
+        ora shl4,x
         tax
         lda conv,x
         ldy #8
         sta (r_dst),y
-dc_next:
-        clc
         lda r_dst
+        clc
         adc #16
         sta r_dst
         bcc :+
         inc r_dst+1
-:       lda r_mx
-        clc
-        adc #1
+:       ldy r_mx
+        iny
+        tya
         and #31
         sta r_mx
-        inc r_col
-        lda r_col
-        cmp r_end
-        bne :+
+        dec r_cnt
+        bne dc_col
         rts
-:       lda cgb
-        beq dc_col
-        ; fall through
 
-; GBC column: tile attributes from VRAM bank 1 (palette, bank, flips).
+; GBC columns: tile attributes from VRAM bank 1 (palette, bank, flips).
 draw_cols_cgb:
-        ldy r_mx
         lda r_map+1
         clc
         adc #VRAM1OFS
         sta r_amap+1
         lda r_map
         sta r_amap
-        lda (r_amap),y
+        lda r_fine
+        eor #$0E
+        sta r_finef             ; tile row offset for Y-flipped tiles
+        lda #<convp
+        sta r_pc
+dcc_col:
+        ldy r_mx
+        lda (r_amap),y          ; attributes
         sta r_a
         ldx r_col
         sta lattr,x
-        lda (r_map),y
+        lda (r_map),y           ; tile
         tax
-        lda r_fine
-        bit r_a                 ; Y flip: row 7 - row
-        bvc :+
-        eor #$0E
-:       ora shl4,x
-        sta r_tp
+        lda shl4,x
+        bit r_a
+        bvs @yf
+        ora r_fine
+        bvc @yd
+@yf:    ora r_finef
+@yd:    sta r_tp
 cgb_thi:
         lda thi_u,x
         sta r_tp+1
-        lda r_a                 ; bit 3: tile data in VRAM bank 1
-        and #$08
+        lda r_a
+        and #$08                ; tile data in VRAM bank 1
         beq :+
         lda r_tp+1
         clc
         adc #VRAM1OFS
         sta r_tp+1
-:       ldy #0
-        lda (r_tp),y
-        sta r_lo
-        iny
+:       ldy #1
         lda (r_tp),y
         sta r_hi
-        lda r_a                 ; X flip
+        dey
+        lda (r_tp),y
+        sta r_lo
+        lda r_a
         and #$20
-        beq :+
-        ldx r_lo
-        lda rev,x
-        sta r_lo
-        ldx r_hi
-        lda rev,x
-        sta r_hi
-:       lda r_a                 ; conv table of this tile's palette
+        bne @xf
+@xd:    lda r_a                 ; conv table of the tile's palette
         and #7
         clc
         adc #>convp
         sta r_pc+1
-        lda #<convp
-        sta r_pc
         lda r_hi                ; left 4 pixels
         and #$F0
         ldx r_lo
@@ -553,17 +548,37 @@ cgb_thi:
         lda (r_pc),y
         ldy #0
         sta (r_dst),y
-        ldx r_hi                ; right 4 pixels
-        lda shl4,x
-        sta r_t
-        lda r_lo
+        lda r_lo                ; right 4 pixels
         and #$0F
-        ora r_t
+        ldx r_hi
+        ora shl4,x
         tay
         lda (r_pc),y
         ldy #8
         sta (r_dst),y
-        jmp dc_next
+        lda r_dst
+        clc
+        adc #16
+        sta r_dst
+        bcc :+
+        inc r_dst+1
+:       inc r_col
+        ldy r_mx
+        iny
+        tya
+        and #31
+        sta r_mx
+        dec r_cnt
+        beq :+
+        jmp dcc_col
+:       rts
+@xf:    ldx r_lo                ; X flip
+        lda rev,x
+        sta r_lo
+        ldx r_hi
+        lda rev,x
+        sta r_hi
+        jmp @xd
 
 ; Background with fine horizontal scroll (SCX & 7 != 0): draw one extra tile
 ; into a scratch line with the same layout as the bitmap (byte i at offset 8*i),
@@ -1300,133 +1315,75 @@ draw_sprites:
         lda rev,x
         sta r_hi
 :       lda cgb
-        beq :+
-        lda r_attr              ; GBC: OBJ palette * 4
+        beq @dmgpal
+        lda r_attr              ; GBC: dist16 rows of the 3 sprite colors
         and #7
         asl
         asl
-        sta r_pal
-        jmp @go
-:       lda r_attr
+        ora #32
+        tay
+        ldx #1
+:       lda pal_c64+1,y
+        asl
+        asl
+        asl
+        asl
+        sta trow,x
+        iny
+        inx
+        cpx #4
+        bne :-
+        jmp @clip
+@dmgpal:
+        lda r_attr              ; DMG: shades of colors 1-3 from OBP0/1
+        sta r_prio
         and #$10
         beq :+
         lda IORAM+$49
         bne :++
 :       lda IORAM+$48
-:       sta r_pal
-@go:    lda #$FF
-        sta s_lcell
-        lda #8
-        sta r_px
-@pix:   lda #0                  ; color = hi bit 7 << 1 | lo bit 7
-        asl r_lo
-        rol
-        asl r_hi
-        bcc :+
-        ora #2
-:       tay
-        beq @skip               ; color 0 is transparent
-        lda r_x
-        cmp #160
-        bcs @skip
-        lda cgb
-        bne @cgbpix
-        lda r_attr
-        sta r_prio
-        lda r_pal               ; shade = (pal >> 2*color) & 3
 :       lsr
         lsr
+        tay
+        and #3
+        sta spal+1
+        tya
+        lsr
+        lsr
+        tay
+        and #3
+        sta spal+2
+        tya
+        lsr
+        lsr
+        sta spal+3
+
+@clip:  lda #8                  ; clip to the screen
+        sta r_px
+        lda r_x
+        cmp #160
+        bcc @right
+        cmp #$F9
+        bcs :+
+        jmp @done               ; off screen
+:       lda #0                  ; partly off the left edge: skip -x pixels
+        sec
+        sbc r_x
+        tay
+:       asl r_lo
+        asl r_hi
+        dec r_px
         dey
         bne :-
-        sta r_t
-        jsr put_pixel
-@skip:  inc r_x
-        dec r_px
-        bne @pix
-        ldy r_n
-        jmp @one
-@cgbpix:
-        sty r_q                 ; color 1-3
-        lda r_x                 ; cell under the pixel
-        lsr
-        lsr
-        tax
-        cpx s_lcell             ; same cell and color as the previous pixel?
-        bne :+
-        cpy s_lcol
-        bne :+
-        lda s_lbp
-        sta r_t
-        jmp @prio
-:       stx s_lcell
-        sty s_lcol
-        lda cellattr,x
-        sta r_prio
-        and #7
-        tay
-        lda palmap,y            ; bit pair of BG color 0 in this cell
-        and #3
-        sta r_bg0
-        lda r_q                 ; sprite color -> nearest of the cell's 4 colors
-        clc
-        adc r_pal
-        tay
-        lda pal_c64+32,y
-        asl
-        asl
-        asl
-        asl
-        sta r_q                 ; dist16 row
-        ora gbg0
-        tay
-        lda dist16,y
-        sta s_t
         lda #0
-        sta r_t
-        lda cs1,x
-        ora r_q
-        tay
-        lda dist16,y
-        cmp s_t
+        sta r_x
+@right: lda #160
+        sec
+        sbc r_x
+        cmp r_px
         bcs :+
-        sta s_t
-        lda #1
-        sta r_t
-:       lda cs2,x
-        ora r_q
-        tay
-        lda dist16,y
-        cmp s_t
-        bcs :+
-        sta s_t
-        lda #2
-        sta r_t
-:       lda cs3,x
-        ora r_q
-        tay
-        lda dist16,y
-        cmp s_t
-        bcs :+
-        lda #3
-        sta r_t
-:       lda r_t
-        sta s_lbp
-@prio:
-        lda IORAM+$40           ; LCDC bit 0 clear: sprites always on top
-        and #1
-        bne :+
-        sta r_prio
-        beq :++
-:       lda r_attr
-        ora r_prio
-        sta r_prio
-:       jsr put_pixel
-        jmp @skip
-
-; Plot a sprite pixel: r_x = x, r_t bits 0-1 = bit pair,
-; r_prio bit 7 = only over background color 0.
-put_pixel:
-        ldx r_x
+        sta r_px
+:       ldx r_x                 ; bitmap byte of the first pixel
         lda xoff_lo,x
         clc
         adc r_line
@@ -1435,46 +1392,150 @@ put_pixel:
         adc r_line+1
         sta r_tp+1
         txa
+        lsr
+        lsr
+        sta r_cellx
+        txa
         and #3
-        tax                     ; X = pixel within byte (0 = leftmost)
+        tax                     ; X = pixel position within the byte
+        lda cgb
+        beq @pix
+        jsr cell_map
+
+@pix:   lda #0                  ; color = hi bit 7 << 1 | lo bit 7
+        asl r_lo
+        rol
+        asl r_hi
+        bcc :+
+        ora #2
+:       tay
+        beq @next               ; color 0 is transparent
+        lda spal,y              ; bit pair to draw
+        bpl :+
+        jsr map_color           ; GBC: not computed yet for this cell
+:       bit r_prio
+        bpl @put
+        sta r_q                 ; behind BG: only over BG color 0
         ldy #0
-        lda r_prio
-        bpl @draw
-        lda (r_tp),y            ; behind BG: only over BG color 0
+        lda (r_tp),y
         and pmask,x
-        sta r_q
+        sta s_t
         lda r_bg0
-        jsr shift_shade
-        cmp r_q
-        bne @r
-@draw:  lda r_t
-        and #3
-        jsr shift_shade
+        ora posoff,x
+        tay
+        lda shtab,y
+        cmp s_t
+        bne @next
+        lda r_q
+@put:   ora posoff,x
+        tay
+        lda shtab,y
         sta r_q
+        ldy #0
         lda (r_tp),y
         and pmask_inv,x
         ora r_q
         sta (r_tp),y
-@r:     rts
+@next:  dec r_px
+        beq @done
+        inx
+        cpx #4
+        bne @pix
+        ldx #0                  ; next bitmap byte (= next 4x8 cell)
+        lda r_tp
+        clc
+        adc #8
+        sta r_tp
+        bcc :+
+        inc r_tp+1
+:       lda cgb
+        beq @pix
+        inc r_cellx
+        jsr cell_map
+        jmp @pix
+@done:  ldy r_n
+        jmp @one
 
-; A = shade (0-3), X = pixel position in byte -> shade moved into place.
-shift_shade:
-        cpx #3
-        beq @r
-        asl
-        asl
-        cpx #2
-        beq @r
-        asl
-        asl
-        cpx #1
-        beq @r
-        asl
-        asl
-@r:     rts
+; GBC: bit pairs for sprite colors 1-3 in cell r_cellx (nearest of the cell's
+; four colors), plus the cell's priority and BG color 0 bit pair. Preserves X.
+cell_map:
+        stx s_ox
+        ldx r_cellx
+        lda cellattr,x
+        sta r_prio
+        and #7
+        tay
+        lda palmap,y
+        and #3
+        sta r_bg0
+        lda IORAM+$40           ; LCDC bit 0 clear: sprites always on top
+        and #1
+        bne :+
+        sta r_prio
+        beq :++
+:       lda r_attr
+        ora r_prio
+        sta r_prio
+:       lda #$FF                ; sprite colors are mapped on first use
+        sta spal+1
+        sta spal+2
+        sta spal+3
+        ldx s_ox
+        rts
+
+; GBC: Y = sprite color (1-3) -> A = nearest of cell r_cellx's four colors,
+; stored in spal. Preserves X.
+map_color:
+        sty s_c
+        stx s_ox
+        ldx r_cellx
+        lda trow,y
+        sta s_j
+        ora gbg0
+        tay
+        lda dist16,y
+        sta s_t
+        lda #0
+        sta s_col
+        lda cs1,x
+        ora s_j
+        tay
+        lda dist16,y
+        cmp s_t
+        bcs :+
+        sta s_t
+        lda #1
+        sta s_col
+:       lda cs2,x
+        ora s_j
+        tay
+        lda dist16,y
+        cmp s_t
+        bcs :+
+        sta s_t
+        lda #2
+        sta s_col
+:       lda cs3,x
+        ora s_j
+        tay
+        lda dist16,y
+        cmp s_t
+        bcs :+
+        lda #3
+        sta s_col
+:       ldy s_c
+        lda s_col
+        sta spal,y
+        ldx s_ox
+        rts
 
 pmask:     .byte $C0, $30, $0C, $03
 pmask_inv: .byte $3F, $CF, $F3, $FC
+posoff:    .byte 0, 4, 8, 12
+shtab:     .byte $00, $40, $80, $C0     ; bit pair << (6 - 2 * position)
+           .byte $00, $10, $20, $30
+           .byte $00, $04, $08, $0C
+           .byte $00, $01, $02, $03
 
 ; ---------------------------------------------------------------------------
 ; GBC colors -> C64 colors
