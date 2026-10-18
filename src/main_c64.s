@@ -20,14 +20,16 @@ REU_LENHI  = $DF08
 REU_ADDRCTL = $DF0A
 
 
-; Frame pacing: CIA ticks per GB frame (70224 / 1048576 s at the PAL CIA
-; clock of 985248 Hz). Assumes the CIA keeps its 1 MHz clock in turbo mode.
-FRAME_TICKS = 16495
-MAX_LAG     = 3 * FRAME_TICKS  ; never build up more debt than this
+; Frame pacing: CIA ticks per GB frame (70224 / 1048576 s at the CIA clock).
+; Assumes the CIA keeps its 1 MHz clock in turbo mode.
+FRAME_PAL   = 16495            ; CIA ticks per GB frame, PAL (985248 Hz)
+FRAME_NTSC  = 17123            ; NTSC (1022727 Hz)
+MAX_LAG     = 3 * FRAME_PAL    ; never build up more debt than this
 MAX_SKIP    = 3                ; render at least every 4th frame
 
 .import __BROWSER_LOAD__, __BROWSER_RUN__, __BROWSER_SIZE__
 .import __HICODE_LOAD__, __HICODE_RUN__, __HICODE_SIZE__
+.import __DIAG_LOAD__, __DIAG_RUN__, __DIAG_SIZE__
 REU_BROWSER = $FD           ; REU bank holding a copy of the ROM browser
 
 .segment "LOADADDR"
@@ -66,7 +68,8 @@ start:
         lda #$8F
         sta $D031
 :
-        jsr browser_fetch
+        jsr browser_fetch       ; (also installs the $C300 code on the first start)
+        jsr video_detect
         jsr zp_clear
         jsr browser             ; choose a ROM and load it into the REU
         jsr zp_clear
@@ -93,42 +96,66 @@ start:
 
 irq:    rti
 
-; The ROM browser runs at $9000. Its load image at $3800 is saved in the REU
-; on the first start and copied from there on every start (RESTORE included).
+; The ROM browser runs at $9000 and the diagnostics at $9800. On the first
+; start both are copied there from their load images and saved in the REU;
+; every start (RESTORE included) copies them back from the REU.
 browser_fetch:
         lda first_run
         beq :+
         jsr hicode_copy
-        lda #$90                ; C64 -> REU
+        jsr diag_copy
+        jsr browser_copy
+        lda #$90                ; $9000-$9FFF -> REU
         jsr @dma
         lda #0
         sta first_run
-:       lda #$91                ; REU -> C64
+:       lda #$91                ; REU -> $9000-$9FFF
 @dma:   pha
-        cmp #$90
-        bne :+
-        lda #<__BROWSER_LOAD__
-        ldx #>__BROWSER_LOAD__
-        bne :++
-:       lda #<__BROWSER_RUN__
-        ldx #>__BROWSER_RUN__
-:       sta REU_C64LO
-        stx REU_C64HI
+        lda #<__BROWSER_RUN__
+        sta REU_C64LO
+        lda #>__BROWSER_RUN__
+        sta REU_C64HI
         lda #0
         sta REU_LO
         sta REU_MID
         sta REU_ADDRCTL
         lda #REU_BROWSER
         sta REU_BANK
-        lda #<__BROWSER_SIZE__
+        lda #0                  ; browser + diagnostics overlay: $9000-$9FFF
         sta REU_LENLO
-        lda #>__BROWSER_SIZE__
+        lda #$10
         sta REU_LENHI
         pla
         sta REU_CMD
         rts
 first_run:
         .byte 1
+
+; Copy the browser overlay from its load image ($3800) to $9000.
+browser_copy:
+        lda #<__BROWSER_LOAD__
+        sta ptr
+        lda #>__BROWSER_LOAD__
+        sta ptr+1
+        lda #<__BROWSER_RUN__
+        sta ptr2
+        lda #>__BROWSER_RUN__
+        sta ptr2+1
+        ldx #>(__BROWSER_SIZE__+255)
+        bne copy_pages
+
+; Copy the diagnostics overlay from its load image to $9800.
+diag_copy:
+        lda #<__DIAG_LOAD__
+        sta ptr
+        lda #>__DIAG_LOAD__
+        sta ptr+1
+        lda #<__DIAG_RUN__
+        sta ptr2
+        lda #>__DIAG_RUN__
+        sta ptr2+1
+        ldx #>(__DIAG_SIZE__+255)
+        bne copy_pages
 
 ; Copy the extra resident code from its load image ($4000) to $C300.
 hicode_copy:
@@ -141,6 +168,7 @@ hicode_copy:
         lda #>__HICODE_RUN__
         sta ptr2+1
         ldx #>(__HICODE_SIZE__+255)
+copy_pages:
         ldy #0
 :       lda (ptr),y
         sta (ptr2),y
@@ -408,10 +436,10 @@ frame_pace:
         sta t_bal+1
         sec
         lda t_bal
-        sbc #<FRAME_TICKS
+        sbc frame_ticks
         sta t_bal
         lda t_bal+1
-        sbc #>FRAME_TICKS
+        sbc frame_ticks+1
         sta t_bal+1
         bpl @behind
         sec                     ; ahead: wait -t_bal ticks
@@ -450,11 +478,11 @@ frame_pace:
         lda #>MAX_LAG
         sta t_bal+1
 :       lda t_bal+1             ; more than one frame behind?
-        cmp #>FRAME_TICKS
+        cmp frame_ticks+1
         bcc @render
         bne :+
         lda t_bal
-        cmp #<FRAME_TICKS
+        cmp frame_ticks
         bcc @render
 :       lda t_skip
         cmp #MAX_SKIP
@@ -509,69 +537,6 @@ timer_init:
         sta t_bal+1
         sta t_skip
         rts
-
-; Joystick port 2 + keyboard -> joy_dirs / joy_btns.
-read_input:
-        lda #$FF
-        sta $DC02               ; port A output (keyboard columns)
-        lda #0
-        sta $DC03               ; port B input
-        lda #$FF
-        sta $DC00
-        lda $DC00               ; joystick 2, active low
-        eor #$FF
-        tax
-        and #$0F
-        tay
-        lda joymap,y
-        sta joy_dirs
-        txa
-        and #$10
-        beq :+
-        lda #1                  ; fire = A
-:       sta joy_btns
-        lda #$7F                ; column 7: SPACE = B (row 4)
-        sta $DC00
-        lda $DC01
-        and #$10
-        bne :+
-        lda joy_btns
-        ora #2
-        sta joy_btns
-:       lda #$FD                ; column 1: left SHIFT = Select (row 7)
-        sta $DC00
-        lda $DC01
-        and #$80
-        bne :+
-        lda joy_btns
-        ora #4
-        sta joy_btns
-:       lda #$FE                ; column 0: RETURN = Start (row 1)
-        sta $DC00
-        lda $DC01
-        tax
-        and #$02
-        bne :+
-        lda joy_btns
-        ora #8
-        sta joy_btns
-:       lda #$FF
-        sta $DC00
-        txa                     ; F1 (row 4): save the game on key press
-        and #$10
-        cmp f1_prev
-        sta f1_prev
-        beq :+
-        cmp #0
-        bne :+
-        jmp save_game
-:       rts
-
-; C64 joystick (bit0 up, 1 down, 2 left, 3 right) -> GB (0 R, 1 L, 2 U, 3 D)
-joymap:
-        .repeat 16, I
-        .byte ((I & 8) >> 3) | ((I & 4) >> 1) | ((I & 1) << 2) | ((I & 2) << 2)
-        .endrep
 
 .ifdef AUTOKEYS
 ; Scripted input for screenshots: entries (frame, buttons, directions),
@@ -668,6 +633,9 @@ sram_flush:
         bpl @s
         rts
 
+
+.include "input.s"
+.include "diag.s"
 
 .segment "BROWSER"           ; one-time set-up, runs from the overlay
 ; ---- video ----------------------------------------------------------------

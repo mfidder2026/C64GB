@@ -51,6 +51,9 @@ browser:
         and #$7F
         cmp #$49
         beq @uci
+.ifdef DIAGTEST
+        jsr diag
+.endif
         lda #<msg_nouci         ; no UCI: run the ROM already in the REU,
         ldx #>msg_nouci         ; if there is one (Nintendo logo at $0104)
         ldy #10
@@ -591,6 +594,14 @@ print_at:
         jsr row_ptr
         ldy #0
         beq print_str
+print_at_col2_20:               ; row Y, column 20
+        sta ptr2
+        stx ptr2+1
+        tya
+        tax
+        jsr row_ptr
+        ldy #20
+        bne print_str
 print_at_col2:
         sta ptr2
         stx ptr2+1
@@ -639,6 +650,7 @@ get_input:
 :       lda $D012
         cmp #250
         beq :-
+        jsr diag_key
         jsr scan_input
         cmp b_old
         beq @held

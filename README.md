@@ -101,6 +101,7 @@ This happens around the eyes, for example.
   - the noise channel, or else the wave channel (as a triangle), plays on voice 3
   - volume envelopes, length counters, panning and master volume are handled
 - **Joystick and keyboard input.** Press RESTORE to return to the browser.
+- **PAL and NTSC** are detected at start-up, for correct pacing and pitch.
 
 ## Running it on a Commodore 64 Ultimate
 
@@ -116,10 +117,16 @@ This happens around the eyes, for example.
    also send the program over the network with `make deploy U64=<ip-address>`.
 3. Start `c64gb.prg`. Pick a ROM with the joystick or the cursor keys and press fire or
    RETURN. `←` goes to the parent folder.
+4. **D** in the browser opens a diagnostics screen. It shows:
+   - the video standard
+   - whether the turbo register, REU and Command Interface are detected
+   - the effective CPU speed
+   - CIA timer ticks per video frame (about 19,656 on PAL means the CIA keeps 1 MHz)
+   - the time an 8 KB REU transfer takes
 
 | Game Boy | C64 |
 |---|---|
-| D-pad | Joystick in port 2 |
+| D-pad | Joystick in port 2, or W A S D |
 | A | Fire |
 | B | Space |
 | Start | RETURN |

@@ -194,11 +194,11 @@ snd_freq:
         eor #$FF
         adc #8
         sta div_v+1
-        lda #<2231950           ; pulse: 2231950 / (2048 - x)
+        lda snd_k               ; pulse: K / (2048 - x) (K = 2231950 on PAL)
         sta div_q
-        lda #>2231950
+        lda snd_k+1
         sta div_q+1
-        lda #^2231950
+        lda snd_k+2
         sta div_q+2
         cpy #2
         bne :+
