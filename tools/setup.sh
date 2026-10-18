@@ -27,4 +27,10 @@ mkdir -p tests/roms
     https://github.com/mattcurrie/dmg-acid2/releases/download/v1.0/dmg-acid2.gb
 [ -f tests/roms/cgb-acid2.gbc ] || curl -L -o tests/roms/cgb-acid2.gbc \
     https://github.com/mattcurrie/cgb-acid2/releases/download/v1.1/cgb-acid2.gbc
+[ -f tests/roms/dmg-acid2-ref.png ] || curl -L -o tests/roms/dmg-acid2-ref.png https://raw.githubusercontent.com/mattcurrie/dmg-acid2/master/img/reference-dmg.png
+[ -f tests/roms/cgb-acid2-ref.png ] || curl -L -o tests/roms/cgb-acid2-ref.png https://raw.githubusercontent.com/mattcurrie/cgb-acid2/master/img/reference.png
+# homebrew used for screenshots (zlib / GPL licensed, see README credits)
+[ -f tests/roms/libbet.gb ] || curl -L -o tests/roms/libbet.gb https://github.com/pinobatch/libbet/releases/download/v0.08/libbet.gb
+[ -f tests/roms/gb240p.gb ] || curl -L -o tests/roms/gb240p.gb https://github.com/pinobatch/240p-test-mini/releases/download/v0.23/gb240p.gb
+[ -f tests/roms/ucity.gbc ] || curl -L -o tests/roms/ucity.gbc https://github.com/AntonioND/ucity/releases/download/v1.3/ucity.gbc
 echo "setup complete"

@@ -59,7 +59,7 @@ flowchart LR
 | 3 | UCI file browser: pick a `.gb` on USB/SD → REU | ROM loads on a real Ultimate without a PC | built, untested on hardware |
 | 4 | Sprites, window, palettes, frame skip, fine SCX scroll | Homebrew games playable | all but fine SCX scroll |
 | 5 | Performance: profile in sim65, threaded dispatch, tile cache | ≥ 90% speed at 48 MHz | |
-| 6 | Sound via SID | Recognisable music | |
+| 6 | Sound via SID | Recognisable music | ✅ first version (checked with VICE SID register dumps) |
 | 7 | Cartridge RAM saves via `SAVE_REU`, basic MBC3 RTC | Games can save | |
 | 8 | Accurate STAT/mode-3 timing | Raster-effect games correct | |
 | 9 | Game Boy Color | Colours approximated with the 16 C64 colours | ✅ first version (µCity, cgb-acid2) |
@@ -75,7 +75,8 @@ flowchart LR
 | `$4000-$5FFF` | VRAM bank 0 |
 | `$6000-$7FFF` | WRAM (`$7000` = switchable GBC bank, swapped with the REU at `$FC0000`) |
 | `$8000-$9FFF` | GBC: VRAM bank 1 / DMG: 32 extra cache slots |
-| `$A000-$BFFF`, `$C300-$CFFF` | page cache (ROM pages and cartridge RAM pages with write-back to `$FE0000`) |
+| `$A000-$BFFF`, `$C800-$CFFF` | page cache (ROM pages and cartridge RAM pages with write-back to `$FE0000`) |
+| `$C300-$C7FF` | sound code (loaded at `$4000` and copied here on the first start) |
 | `$C000-$C2FF` | I/O registers + HRAM, OAM, `$FF` page |
 | `$D000-$D3FF` | VIC screen matrix (RAM under I/O) |
 | `$D400-$DFFF` | renderer tables (RAM under I/O; the renderer runs with I/O switched off) |
@@ -96,7 +97,25 @@ the cell's background pixels use over the 8 lines and gives unused slots to spri
 colours. Each sprite pixel then picks the nearest of the cell's four actual colours,
 with a one-entry cache per sprite.
 
-## 6. Risks / to be measured on real hardware
+## 6. Sound
+
+| Game Boy | SID |
+|---|---|
+| CH1 pulse + sweep | voice 1, pulse (duty 12.5/25/50/75% → PW $200/$400/$800/$C00) |
+| CH2 pulse | voice 2 |
+| CH4 noise, else CH3 wave | voice 3 (noise / triangle) |
+
+- **Frequencies:**
+  - pulse: SID value = 2231950 / (2048 − x)
+  - wave: half of that
+  - noise: 557991 / divisor >> (shift + 1)
+- **Volume:** a channel's volume (0–15) is the SID sustain level, with attack, decay
+  and release all 0. When the volume goes up, the gate is retriggered.
+- **Once per frame:** envelopes, length counters (4 steps per frame) and the CH1
+  sweep are stepped.
+- **Status:** NR52 reports the channel status.
+
+## 7. Risks / to be measured on real hardware
 
 1. **REU DMA speed in turbo mode**: does DMA run at 1 MHz or faster? Determines the
    cost of a cache miss (256 bytes).
@@ -105,7 +124,7 @@ with a one-entry cache per sprite.
 3. **Bank-switch-heavy games** (e.g. Pokémon): the cache lookup should become hash based.
 4. Timing-sensitive games (mid-scanline effects) need milestone 8.
 
-## 7. Measurements (sim65, `make bench`)
+## 8. Measurements (sim65, `make bench`)
 
 | Situation | C64 cycles per GB cycle | 48 MHz | 64 MHz |
 |---|---|---|---|

@@ -194,6 +194,9 @@ serial_out:
         ldy #1
         jmp write_out
 
+sound_status:
+        lda IORAM+$26
+        rts
 palette_write:
         sta IORAM+$47
 sound_write:

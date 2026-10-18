@@ -27,6 +27,7 @@ MAX_LAG     = 3 * FRAME_TICKS  ; never build up more debt than this
 MAX_SKIP    = 3                ; render at least every 4th frame
 
 .import __BROWSER_LOAD__, __BROWSER_RUN__, __BROWSER_SIZE__
+.import __HICODE_LOAD__, __HICODE_RUN__, __HICODE_SIZE__
 REU_BROWSER = $FD           ; REU bank holding a copy of the ROM browser
 
 .segment "LOADADDR"
@@ -73,6 +74,7 @@ start:
         jsr render_init
         jsr timer_init          ; (before gb_init, which clears the overlay)
         jsr gb_init
+        jsr sound_init
         lda has_sram
         beq :+
         jsr sram_clear
@@ -85,6 +87,7 @@ irq:    rti
 browser_fetch:
         lda first_run
         beq :+
+        jsr hicode_copy
         lda #$90                ; C64 -> REU
         jsr @dma
         lda #0
@@ -115,6 +118,28 @@ browser_fetch:
         rts
 first_run:
         .byte 1
+
+; Copy the extra resident code from its load image ($4000) to $C300.
+hicode_copy:
+        lda #<__HICODE_LOAD__
+        sta ptr
+        lda #>__HICODE_LOAD__
+        sta ptr+1
+        lda #<__HICODE_RUN__
+        sta ptr2
+        lda #>__HICODE_RUN__
+        sta ptr2+1
+        ldx #>(__HICODE_SIZE__+255)
+        ldy #0
+:       lda (ptr),y
+        sta (ptr2),y
+        iny
+        bne :-
+        inc ptr+1
+        inc ptr2+1
+        dex
+        bne :-
+        rts
 
 ; RESTORE: back to the ROM browser.
 nmi:    ldx #$FF
@@ -242,7 +267,6 @@ sram_clear:
 ; ---- hooks -------------------------------------------------------------------
 
 serial_out:
-sound_write:
         rts
 
 palette_write:
@@ -256,6 +280,7 @@ vblank_hook:
         bne :+
         inc frames+1
 :       jsr frame_pace
+        jsr sound_frame
         jsr read_input
 .ifdef AUTOKEYS
         jmp autokeys
@@ -575,6 +600,7 @@ video_init:
 .include "io.s"
 .include "init.s"
 .include "cgb.s"
+.include "sound.s"
 .include "render.s"
 .include "browser.s"
 .include "tables.s"

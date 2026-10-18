@@ -90,6 +90,11 @@ This happens around the eyes, for example.
   - general and HBlank DMA (HDMA)
   - double-speed mode
 - **Cartridge RAM** in the REU, paged through the same cache with write-back.
+- **Sound through the SID**:
+  - GB pulse channels 1 and 2 play on SID voices 1 and 2, with duty → pulse width and
+    the channel 1 frequency sweep
+  - the noise channel, or else the wave channel (as a triangle), plays on voice 3
+  - volume envelopes, length counters, panning and master volume are handled
 - **Joystick and keyboard input.** Press RESTORE to return to the browser.
 
 ## Running it on a Commodore 64 Ultimate
@@ -204,7 +209,7 @@ prints C64 cycles per routine. It is how the hot spots above were found and redu
 - [x] Performance work, round 1 (profiler, dispatcher, renderer, sprites)
 - [x] Real-time pacing with adaptive frame skip
 - [ ] Performance work towards full speed (pre-converted tile cache)
-- [ ] Sound through the SID
+- [x] Sound through the SID (first version)
 - [ ] Save games to SD (`DOS_CMD_SAVE_REU`)
 - [x] Game Boy Color support (approximated with the 16 C64 colours)
 - [x] Sprite-aware GBC colour cells: background slots a cell doesn't use go to sprite colours

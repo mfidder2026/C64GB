@@ -359,7 +359,10 @@ io_read_x:
         beq @tima
         cpx #$0F
         beq @if
-        cpx #$4D
+        cpx #$26
+        bne :+
+        jmp sound_status
+:       cpx #$4D
         bcc :+
         lda cgb
         beq :+

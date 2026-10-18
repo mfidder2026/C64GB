@@ -37,6 +37,13 @@ palprev  = RTAB+$B40    ; 128: palette RAM at the last conversion
 
 VRAM1OFS = >VRAM1 - >VRAM
 
+; One-time set-up code goes into the start-up overlay on the C64
+.ifdef TARGET_C64
+.define INITSEG "BROWSER"
+.else
+.define INITSEG "CODE"
+.endif
+
 ; Per cell sprite color wishes, in the bottom of the stack page (the
 ; emulator uses far less than the remaining 96 bytes of stack)
 wantn    = $0100        ; 40: number of sprite colors wanted
@@ -69,119 +76,6 @@ colbuf:   .res 40       ; color RAM bytes (read while I/O is on)
         sta $01
 .endif
 .endmacro
-
-; Build the static lookup tables.
-render_init:
-        IO_OFF
-        ldx #0
-@t:     txa
-        lsr
-        lsr
-        lsr
-        lsr
-        sta shr4,x
-        txa
-        asl
-        asl
-        asl
-        asl
-        sta shl4,x
-        txa                     ; bit reverse
-        ldy #8
-:       lsr
-        rol r_t
-        dey
-        bne :-
-        lda r_t
-        sta rev,x
-        txa
-        lsr
-        lsr
-        lsr
-        lsr
-        clc
-        adc #>VRAM
-        sta thi_u,x
-        cpx #$80
-        bcs :+
-        adc #$10                ; tiles 0-127 at $9000 in signed mode
-:       sta thi_s,x
-        inx
-        bne @t
-
-        ; bitmap line addresses
-        ldx #0
-@l:     txa
-        lsr
-        lsr
-        lsr
-        clc
-        adc #TOP_ROW
-        tay                     ; Y = cell row
-        lda #0
-        sta r_lo
-        sta r_hi
-:       cpy #0                  ; r_hi:r_lo = cell row * 320
-        beq :+
-        clc
-        lda r_lo
-        adc #<320
-        sta r_lo
-        lda r_hi
-        adc #>320
-        sta r_hi
-        dey
-        jmp :-
-:       txa
-        and #7
-        clc
-        adc r_lo
-        sta line_lo,x
-        lda r_hi
-        adc #>BITMAP
-        sta line_hi,x
-        inx
-        cpx #144
-        bne @l
-
-        ; pixel x -> byte offset within a line
-        ldx #0
-@x:     txa
-        lsr
-        lsr
-        lsr
-        sta r_t                 ; tile column
-        lda #0
-        sta r_hi
-        lda r_t
-        asl
-        asl
-        asl
-        asl
-        rol r_hi
-        sta r_lo                ; column * 16
-        txa
-        and #4
-        beq :+
-        lda r_lo
-        ora #8
-        sta r_lo
-:       lda r_lo
-        sta xoff_lo,x
-        lda r_hi
-        sta xoff_hi,x
-        inx
-        cpx #160
-        bne @x
-
-        jsr color_init
-        IO_ON
-        lda #1
-        sta r_on
-        lda IORAM+$47
-        eor #$FF
-        sta bgp_cache           ; force a conversion table build
-        rts
 
 ; Rebuild conv[] for the 2-bit-per-color palette in A (BGP format).
 build_conv:
@@ -1544,92 +1438,6 @@ shtab:     .byte $00, $40, $80, $C0     ; bit pair << (6 - 2 * position)
 ; GBC colors -> C64 colors
 ; ---------------------------------------------------------------------------
 
-; C64 palette (Colodore), 5 bits per component
-c64pal_r: .byte  0,31,16,14,17,10, 5,29,17,10,24, 9,15,21,14,22
-c64pal_g: .byte  0,31, 6,25, 7,21, 5,30,10, 7,13, 9,15,31,13,22
-c64pal_b: .byte  0,31, 7,25,18, 9,19,14, 5, 0,14, 9,15,19,29,22
-
-color_init:
-        ldx #15
-:       lda c64pal_r,x
-        sta c64rgb,x
-        lda c64pal_g,x
-        sta c64rgb+16,x
-        lda c64pal_b,x
-        sta c64rgb+32,x
-        dex
-        bpl :-
-        lda #0                  ; squares 0..31: (n+1)^2 = n^2 + 2n + 1
-        sta n_d
-        sta n_d+1
-        ldx #0
-@sq:    lda n_d
-        sta sqtab_lo,x
-        lda n_d+1
-        sta sqtab_hi,x
-        txa
-        asl
-        sec
-        adc n_d
-        sta n_d
-        bcc :+
-        inc n_d+1
-:       inx
-        cpx #32
-        bne @sq
-        ; dist16[a*16+b] = distance >> 6
-        lda #0
-        sta n_i
-@a:     lda n_i
-        lsr
-        lsr
-        lsr
-        lsr
-        tax
-        lda c64rgb,x
-        sta n_r
-        lda c64rgb+16,x
-        sta n_g
-        lda c64rgb+32,x
-        sta n_b
-        lda n_i
-        and #15
-        tax
-        jsr color_dist
-        lda n_d+1               ; >> 6
-        sta n_t
-        lda n_d
-        asl
-        rol n_t
-        asl
-        rol n_t
-        ldx n_i
-        lda n_t
-        sta dist16,x
-        inc n_i
-        bne @a
-        ldx #127                ; force a full palette conversion
-        lda #0
-:       sta palprev,x
-        dex
-        bpl :-
-        ldx #7                  ; GBC conv tables start as identity mappings
-@cv:    stx n_i
-        lda #<convp
-        sta r_pc
-        txa
-        clc
-        adc #>convp
-        sta r_pc+1
-        lda #$E4
-        sta palmapc,x
-        sta palmap,x
-        jsr build_conv_to
-        ldx n_i
-        dex
-        bpl @cv
-        rts
-
 ; n_d = 2*dr^2 + 4*dg^2 + 3*db^2 between n_r/n_g/n_b and C64 color X.
 color_dist:
         lda n_r
@@ -1906,3 +1714,206 @@ assign_palettes:
         bmi :+
         jmp @p
 :       rts
+
+; ---- one-time set-up (runs from the start-up overlay on the C64) ----------
+.segment INITSEG
+; Build the static lookup tables.
+render_init:
+        IO_OFF
+        ldx #0
+@t:     txa
+        lsr
+        lsr
+        lsr
+        lsr
+        sta shr4,x
+        txa
+        asl
+        asl
+        asl
+        asl
+        sta shl4,x
+        txa                     ; bit reverse
+        ldy #8
+:       lsr
+        rol r_t
+        dey
+        bne :-
+        lda r_t
+        sta rev,x
+        txa
+        lsr
+        lsr
+        lsr
+        lsr
+        clc
+        adc #>VRAM
+        sta thi_u,x
+        cpx #$80
+        bcs :+
+        adc #$10                ; tiles 0-127 at $9000 in signed mode
+:       sta thi_s,x
+        inx
+        bne @t
+
+        ; bitmap line addresses
+        ldx #0
+@l:     txa
+        lsr
+        lsr
+        lsr
+        clc
+        adc #TOP_ROW
+        tay                     ; Y = cell row
+        lda #0
+        sta r_lo
+        sta r_hi
+:       cpy #0                  ; r_hi:r_lo = cell row * 320
+        beq :+
+        clc
+        lda r_lo
+        adc #<320
+        sta r_lo
+        lda r_hi
+        adc #>320
+        sta r_hi
+        dey
+        jmp :-
+:       txa
+        and #7
+        clc
+        adc r_lo
+        sta line_lo,x
+        lda r_hi
+        adc #>BITMAP
+        sta line_hi,x
+        inx
+        cpx #144
+        bne @l
+
+        ; pixel x -> byte offset within a line
+        ldx #0
+@x:     txa
+        lsr
+        lsr
+        lsr
+        sta r_t                 ; tile column
+        lda #0
+        sta r_hi
+        lda r_t
+        asl
+        asl
+        asl
+        asl
+        rol r_hi
+        sta r_lo                ; column * 16
+        txa
+        and #4
+        beq :+
+        lda r_lo
+        ora #8
+        sta r_lo
+:       lda r_lo
+        sta xoff_lo,x
+        lda r_hi
+        sta xoff_hi,x
+        inx
+        cpx #160
+        bne @x
+
+        jsr color_init
+        IO_ON
+        lda #1
+        sta r_on
+        lda IORAM+$47
+        eor #$FF
+        sta bgp_cache           ; force a conversion table build
+        rts
+
+; C64 palette (Colodore), 5 bits per component
+c64pal_r: .byte  0,31,16,14,17,10, 5,29,17,10,24, 9,15,21,14,22
+c64pal_g: .byte  0,31, 6,25, 7,21, 5,30,10, 7,13, 9,15,31,13,22
+c64pal_b: .byte  0,31, 7,25,18, 9,19,14, 5, 0,14, 9,15,19,29,22
+
+color_init:
+        ldx #15
+:       lda c64pal_r,x
+        sta c64rgb,x
+        lda c64pal_g,x
+        sta c64rgb+16,x
+        lda c64pal_b,x
+        sta c64rgb+32,x
+        dex
+        bpl :-
+        lda #0                  ; squares 0..31: (n+1)^2 = n^2 + 2n + 1
+        sta n_d
+        sta n_d+1
+        ldx #0
+@sq:    lda n_d
+        sta sqtab_lo,x
+        lda n_d+1
+        sta sqtab_hi,x
+        txa
+        asl
+        sec
+        adc n_d
+        sta n_d
+        bcc :+
+        inc n_d+1
+:       inx
+        cpx #32
+        bne @sq
+        ; dist16[a*16+b] = distance >> 6
+        lda #0
+        sta n_i
+@a:     lda n_i
+        lsr
+        lsr
+        lsr
+        lsr
+        tax
+        lda c64rgb,x
+        sta n_r
+        lda c64rgb+16,x
+        sta n_g
+        lda c64rgb+32,x
+        sta n_b
+        lda n_i
+        and #15
+        tax
+        jsr color_dist
+        lda n_d+1               ; >> 6
+        sta n_t
+        lda n_d
+        asl
+        rol n_t
+        asl
+        rol n_t
+        ldx n_i
+        lda n_t
+        sta dist16,x
+        inc n_i
+        bne @a
+        ldx #127                ; force a full palette conversion
+        lda #0
+:       sta palprev,x
+        dex
+        bpl :-
+        ldx #7                  ; GBC conv tables start as identity mappings
+@cv:    stx n_i
+        lda #<convp
+        sta r_pc
+        txa
+        clc
+        adc #>convp
+        sta r_pc+1
+        lda #$E4
+        sta palmapc,x
+        sta palmap,x
+        jsr build_conv_to
+        ldx n_i
+        dex
+        bpl @cv
+        rts
+
+.segment "CODE"

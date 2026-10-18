@@ -224,6 +224,12 @@ gb_init:
         sta IORAM+$40
         lda #$85
         sta IORAM+$41
+        lda #$77                ; sound on, as left by the boot ROM
+        sta IORAM+$24
+        lda #$F3
+        sta IORAM+$25
+        lda #$F1
+        sta IORAM+$26
         lda #$FC
         sta IORAM+$47
         lda #$FF
