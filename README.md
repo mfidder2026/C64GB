@@ -180,9 +180,13 @@ Measured in sim65 (`make bench`) as C64 cycles per emulated Game Boy machine cyc
 | Libbet (GBC mode), every frame rendered | 74.4 | 62% | 82% |
 | cgb-acid2 (GBC, many sprites), every frame rendered | 85.7 | 53% | 71% |
 
-By default the C64 build renders every second frame, so real speed sits between the
-two kinds of figures. Game Boy Color games that switch to double-speed mode need twice
-the CPU time.
+The C64 build paces itself with a CIA timer:
+- **Ahead of real time:** it waits, so games never run faster than on a Game Boy.
+- **More than a frame behind:** it skips rendering frames (at most three in a row) to
+  keep the game at the right speed. Real speed therefore sits between the "no
+  rendering" and "every frame rendered" figures.
+
+Game Boy Color games that switch to double-speed mode need twice the CPU time.
 
 `tools/profile.py rom.gb [frame] [frames] [render]` traces the emulator in sim65 and
 prints C64 cycles per routine. It is how the hot spots above were found and reduced:
@@ -198,7 +202,8 @@ prints C64 cycles per routine. It is how the hot spots above were found and redu
 - [x] ROM browser via the Ultimate Command Interface
 - [ ] Testing on real C64 Ultimate hardware
 - [x] Performance work, round 1 (profiler, dispatcher, renderer, sprites)
-- [ ] Performance work towards full speed (tile cache, adaptive frame skip)
+- [x] Real-time pacing with adaptive frame skip
+- [ ] Performance work towards full speed (pre-converted tile cache)
 - [ ] Sound through the SID
 - [ ] Save games to SD (`DOS_CMD_SAVE_REU`)
 - [x] Game Boy Color support (approximated with the 16 C64 colours)

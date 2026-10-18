@@ -124,8 +124,13 @@ dmg-acid2. Round 1 of profiling (`tools/profile.py`) gave these gains:
 - sprite plotting that walks the bitmap with table-driven shifts, and maps GBC
   colours lazily per cell
 
+Frame pacing (C64): CIA 1 timer A measures real time per GB frame (16,495 PAL ticks).
+Timer B counts timer A underflows, so very long frames are detected too. When the
+emulator is ahead it waits; when it is more than a frame behind it skips rendering the
+next frame, at most 3 times in a row. This assumes the CIA keeps its 1 MHz clock in
+turbo mode, which still has to be verified on hardware.
+
 Next candidates:
 - a pre-converted ("packed") tile format so the background loop needs no nibble
   shuffles; this needs memory
-- adaptive frame skip
 - sprite rows written byte-wise

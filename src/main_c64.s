@@ -20,7 +20,11 @@ REU_LENHI  = $DF08
 REU_ADDRCTL = $DF0A
 
 
-FRAMESKIP  = 1              ; render every (FRAMESKIP+1)th frame
+; Frame pacing: CIA ticks per GB frame (70224 / 1048576 s at the PAL CIA
+; clock of 985248 Hz). Assumes the CIA keeps its 1 MHz clock in turbo mode.
+FRAME_TICKS = 16495
+MAX_LAG     = 3 * FRAME_TICKS  ; never build up more debt than this
+MAX_SKIP    = 3                ; render at least every 4th frame
 
 .import __BROWSER_LOAD__, __BROWSER_RUN__, __BROWSER_SIZE__
 REU_BROWSER = $FD           ; REU bank holding a copy of the ROM browser
@@ -67,6 +71,7 @@ start:
         jsr zp_clear
         jsr video_init
         jsr render_init
+        jsr timer_init          ; (before gb_init, which clears the overlay)
         jsr gb_init
         lda has_sram
         beq :+
@@ -115,79 +120,6 @@ first_run:
 nmi:    ldx #$FF
         txs
         jmp start
-
-; ---- video ----------------------------------------------------------------
-
-video_init:
-        lda #0
-        sta $D011               ; blank while setting up
-        lda $DD02               ; VIC bank 3 ($C000-$FFFF)
-        ora #3
-        sta $DD02
-        lda $DD00
-        and #$FC
-        sta $DD00
-        lda #$48                ; screen $D000, bitmap $E000
-        sta $D018
-        lda #$18                ; multicolor, 40 columns
-        sta $D016
-        lda #0
-        sta $D020
-        lda #1                  ; shade 0: white
-        sta $D021
-
-        ; bitmap: margins black (%11), GB area white (%00)
-        lda #>BITMAP
-        sta ptr+1
-        lda #$FF
-        ldx #$1F
-        jsr fill_pages
-        ldy #$3F
-:       sta BITMAP+$1F00,y
-        dey
-        bpl :-
-        lda #<(BITMAP+TOP_ROW*320)
-        sta ptr
-        lda #>(BITMAP+TOP_ROW*320)
-        sta ptr+1
-        ldx #18                 ; 18 cell rows * 320 bytes
-@row:   ldy #0
-        lda #0
-:       sta (ptr),y
-        iny
-        bne :-
-        inc ptr+1
-        ldy #63
-:       sta (ptr),y
-        dey
-        bpl :-
-        lda ptr
-        clc
-        adc #64
-        sta ptr
-        bcc :+
-        inc ptr+1
-:       dex
-        bne @row
-
-        lda #$34                ; screen matrix lives under I/O
-        sta $01
-        lda #>SCREEN
-        sta ptr+1
-        lda #$FB                ; %01 light grey, %10 dark grey
-        ldx #4
-        jsr fill_pages
-        lda #$35
-        sta $01
-        lda #$D8                ; color RAM: %11 black
-        sta ptr+1
-        lda #0
-        ldx #4
-        jsr fill_pages
-
-        lda #$3B                ; bitmap mode, display on
-        sta $D011
-        rts
 
 ; ---- REU backend -------------------------------------------------------------
 
@@ -323,19 +255,154 @@ vblank_hook:
         inc frames
         bne :+
         inc frames+1
-:       lda frames
-        and #FRAMESKIP
-        beq :+
-        lda #0
-        beq :++
-:       lda #1
-:       sta r_on
+:       jsr frame_pace
         jsr read_input
 .ifdef AUTOKEYS
         jmp autokeys
 .else
         rts
 .endif
+
+; Keep the game at real-time speed: wait when ahead, skip rendering the next
+; frame when more than a frame behind (at most MAX_SKIP in a row).
+frame_pace:
+        jsr timer_read          ; t_d = ticks since the last frame
+        sec
+        lda t_last
+        sbc t_now
+        sta t_d
+        lda t_last+1
+        sbc t_now+1
+        sta t_d+1
+        lda t_blast             ; whole 65536-tick periods in between?
+        sbc t_bnow              ; (C from above: borrow if the 16 bits wrapped)
+        ldx t_bnow
+        stx t_blast
+        cmp #0
+        beq :+
+        lda #<MAX_LAG           ; a very slow frame: just mark as far behind
+        sta t_bal
+        lda #>MAX_LAG
+        sta t_bal+1
+        lda t_now
+        sta t_last
+        lda t_now+1
+        sta t_last+1
+        jmp @behind
+:       lda t_now
+        sta t_last
+        lda t_now+1
+        sta t_last+1
+        clc                     ; t_bal += t_d - FRAME_TICKS
+        lda t_bal
+        adc t_d
+        sta t_bal
+        lda t_bal+1
+        adc t_d+1
+        sta t_bal+1
+        sec
+        lda t_bal
+        sbc #<FRAME_TICKS
+        sta t_bal
+        lda t_bal+1
+        sbc #>FRAME_TICKS
+        sta t_bal+1
+        bpl @behind
+        sec                     ; ahead: wait -t_bal ticks
+        lda #0
+        sbc t_bal
+        sta t_d
+        lda #0
+        sbc t_bal+1
+        sta t_d+1
+:       jsr timer_read
+        sec
+        lda t_last
+        sbc t_now
+        tax
+        lda t_last+1
+        sbc t_now+1
+        cmp t_d+1
+        bcc :-
+        bne :+
+        cpx t_d
+        bcc :-
+:       lda t_now
+        sta t_last
+        lda t_now+1
+        sta t_last+1
+        lda #0
+        sta t_bal
+        sta t_bal+1
+        beq @render
+@behind:
+        lda t_bal+1             ; clamp the debt
+        cmp #>MAX_LAG
+        bcc :+
+        lda #<MAX_LAG
+        sta t_bal
+        lda #>MAX_LAG
+        sta t_bal+1
+:       lda t_bal+1             ; more than one frame behind?
+        cmp #>FRAME_TICKS
+        bcc @render
+        bne :+
+        lda t_bal
+        cmp #<FRAME_TICKS
+        bcc @render
+:       lda t_skip
+        cmp #MAX_SKIP
+        bcs @render
+        inc t_skip
+        lda #0
+        sta r_on
+        rts
+@render:
+        lda #0
+        sta t_skip
+        lda #1
+        sta r_on
+        rts
+
+; t_now = CIA 1 timer A (counts down at 1 MHz), t_bnow = timer B low byte
+; (counts timer A underflows), read without tearing.
+timer_read:
+        lda $DC06
+        sta t_bnow
+        lda $DC05
+        sta t_now+1
+        lda $DC04
+        sta t_now
+        lda $DC05
+        cmp t_now+1
+        bne timer_read
+        lda $DC06
+        cmp t_bnow
+        bne timer_read
+        rts
+
+timer_init:
+        lda #$FF
+        sta $DC04
+        sta $DC05
+        sta $DC06
+        sta $DC07
+        lda #$11                ; timer A: start, continuous, load latch
+        sta $DC0E
+        lda #$51                ; timer B: count timer A underflows
+        sta $DC0F
+        jsr timer_read
+        lda t_bnow
+        sta t_blast
+        lda t_now
+        sta t_last
+        lda t_now+1
+        sta t_last+1
+        lda #0
+        sta t_bal
+        sta t_bal+1
+        sta t_skip
+        rts
 
 ; Joystick port 2 + keyboard -> joy_dirs / joy_btns.
 read_input:
@@ -425,6 +492,83 @@ autokey_tab:
         .include "autokeys.inc"
         .word $FFFF
 .endif
+
+.segment "BROWSER"           ; one-time set-up, runs from the overlay
+; ---- video ----------------------------------------------------------------
+
+video_init:
+        lda #0
+        sta $D011               ; blank while setting up
+        lda $DD02               ; VIC bank 3 ($C000-$FFFF)
+        ora #3
+        sta $DD02
+        lda $DD00
+        and #$FC
+        sta $DD00
+        lda #$48                ; screen $D000, bitmap $E000
+        sta $D018
+        lda #$18                ; multicolor, 40 columns
+        sta $D016
+        lda #0
+        sta $D020
+        lda #1                  ; shade 0: white
+        sta $D021
+
+        ; bitmap: margins black (%11), GB area white (%00)
+        lda #>BITMAP
+        sta ptr+1
+        lda #$FF
+        ldx #$1F
+        jsr fill_pages
+        ldy #$3F
+:       sta BITMAP+$1F00,y
+        dey
+        bpl :-
+        lda #<(BITMAP+TOP_ROW*320)
+        sta ptr
+        lda #>(BITMAP+TOP_ROW*320)
+        sta ptr+1
+        ldx #18                 ; 18 cell rows * 320 bytes
+@row:   ldy #0
+        lda #0
+:       sta (ptr),y
+        iny
+        bne :-
+        inc ptr+1
+        ldy #63
+:       sta (ptr),y
+        dey
+        bpl :-
+        lda ptr
+        clc
+        adc #64
+        sta ptr
+        bcc :+
+        inc ptr+1
+:       dex
+        bne @row
+
+        lda #$34                ; screen matrix lives under I/O
+        sta $01
+        lda #>SCREEN
+        sta ptr+1
+        lda #$FB                ; %01 light grey, %10 dark grey
+        ldx #4
+        jsr fill_pages
+        lda #$35
+        sta $01
+        lda #$D8                ; color RAM: %11 black
+        sta ptr+1
+        lda #0
+        ldx #4
+        jsr fill_pages
+
+        lda #$3B                ; bitmap mode, display on
+        sta $D011
+        rts
+
+
+.segment "CODE"
 
 .include "cpu.s"
 .include "mem.s"

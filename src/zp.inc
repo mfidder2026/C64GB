@@ -178,6 +178,13 @@ trow     = $B3          ; GBC: dist16 rows of sprite colors 1-3 (trow+1..trow+3)
 r_cellx  = $B7          ; cell of the current sprite pixel
 ev_op    = $BB          ; opcode fetched when an event became due
 
-; $BC-$EF: zero page dispatcher (segment ZPCODE)
+; $BC-$E3: zero page dispatcher (segment ZPCODE)
+t_now    = $E4          ; frame pacing (C64): 2 bytes each
+t_last   = $E6
+t_d      = $E8
+t_bal    = $EA
+t_skip   = $EC
+t_bnow   = $ED
+t_blast  = $EE
 
 csp      = $F0          ; cc65 parameter stack pointer (sim65 paravirt)

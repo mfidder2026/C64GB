@@ -37,6 +37,13 @@ palprev  = RTAB+$B40    ; 128: palette RAM at the last conversion
 
 VRAM1OFS = >VRAM1 - >VRAM
 
+; Per cell sprite color wishes, in the bottom of the stack page (the
+; emulator uses far less than the remaining 96 bytes of stack)
+wantn    = $0100        ; 40: number of sprite colors wanted
+want0    = $0128        ; 40 each: the wanted C64 colors
+want1    = $0150
+want2    = $0178
+
 .ifdef TARGET_C64
 convp     = $3800       ; GBC: conv table per BG palette (over the browser's load image)
 .endif
@@ -47,10 +54,6 @@ convp:    .res 8*256    ; GBC: conv table per BG palette (color -> bit pair)
 palmap:   .res 8        ; GBC: color -> bit pair mapping byte per BG palette
 palmapc:  .res 8        ; mapping the conv table was built for
 colbuf:   .res 40       ; color RAM bytes (read while I/O is on)
-wantn:    .res 40       ; per cell: number of sprite colors wanted
-want0:    .res 40       ; the wanted C64 colors
-want1:    .res 40
-want2:    .res 40
 .segment "CODE"
 
 .macro IO_OFF
