@@ -70,7 +70,8 @@ flowchart LR
 |---|---|
 | `$0200-$03FF` | RMAP / WMAP page tables |
 | `$0400-$07FF` | cache slot tables, GBC palette tables (the ROM browser's text screen before emulation) |
-| `$0801-$3FFF` | code, dispatch tables, GBC conversion tables |
+| `$0801-$37FF` | code, dispatch tables |
+| `$3800-$3FFF` | ROM browser load image; after start-up the GBC conversion tables (the browser runs at `$9000` and is kept in the REU at `$FD0000`) |
 | `$4000-$5FFF` | VRAM bank 0 |
 | `$6000-$7FFF` | WRAM (`$7000` = switchable GBC bank, swapped with the REU at `$FC0000`) |
 | `$8000-$9FFF` | GBC: VRAM bank 1 / DMG: 32 extra cache slots |
@@ -88,8 +89,12 @@ every BG palette each distinct colour gets a bit pair: colours equal to the back
 use `%00`, the others take the cell's screen RAM nibbles and colour RAM. A fourth
 distinct colour is merged into the nearest one. Each palette has its own conversion
 table (bitplanes → packed pixels), so the inner loop stays a table lookup. Cell colours
-are written on the first line of every cell row. Sprite colours are mapped through a
-precomputed table to the closest of the four colours of the cell under the pixel.
+are written on the first line of every cell row. At that moment C64GB also scans
+OAM for sprites that overlap the cell row and records the colours each sprite really
+draws, per cell. If a wanted colour is not yet in the cell, it checks which bit pairs
+the cell's background pixels use over the 8 lines and gives unused slots to sprite
+colours. Each sprite pixel then picks the nearest of the cell's four actual colours,
+with a one-entry cache per sprite.
 
 ## 6. Risks / to be measured on real hardware
 
@@ -108,7 +113,7 @@ precomputed table to the closest of the four colours of the cell under the pixel
 | CPU heavy, every frame rendered | 76.7 | 60% | 80% |
 | dmg-acid2 (many sprites), every frame | 62.7 | 73% | 97% |
 | Libbet, every frame | 69.1 | 66% | 88% |
-| cgb-acid2 (GBC mode), every frame | 82.7 | 55% | 74% |
+| cgb-acid2 (GBC mode, many sprites), every frame | 96.0 | 48% | 64% |
 
 The C64 build renders every 2nd frame by default, so real figures sit in between.
 Biggest wins for milestone 5: threaded dispatch (fetch + dispatch inside every handler),

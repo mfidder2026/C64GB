@@ -35,6 +35,8 @@ IN_DOWN = 2
 IN_FIRE = 4
 IN_BACK = 8
 
+.segment "BROWSER"
+
 ; Buffers in GB memory that is not used before the emulator starts
 cmdbuf   = VRAM1                ; 72
 respbuf  = VRAM1+$100           ; 256
@@ -714,3 +716,5 @@ msg_loading: .byte "Loading ROM into REU...", 0
 msg_nouci:   .byte "No Ultimate Command Interface found.", 0
 msg_noreu:   .byte "Enable it in the Ultimate menu, or load", 0
 msg_noreu2:  .byte "a ROM into the REU, then press fire.", 0
+
+.segment "CODE"

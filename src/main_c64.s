@@ -22,6 +22,9 @@ REU_ADDRCTL = $DF0A
 
 FRAMESKIP  = 1              ; render every (FRAMESKIP+1)th frame
 
+.import __BROWSER_LOAD__, __BROWSER_RUN__, __BROWSER_SIZE__
+REU_BROWSER = $FD           ; REU bank holding a copy of the ROM browser
+
 .segment "LOADADDR"
         .word $0801
 .segment "EXEHDR"
@@ -58,6 +61,7 @@ start:
         lda #$8F
         sta $D031
 :
+        jsr browser_fetch
         jsr zp_clear
         jsr browser             ; choose a ROM and load it into the REU
         jsr zp_clear
@@ -70,6 +74,42 @@ start:
 :       jmp loop
 
 irq:    rti
+
+; The ROM browser runs at $9000. Its load image at $3800 is saved in the REU
+; on the first start and copied from there on every start (RESTORE included).
+browser_fetch:
+        lda first_run
+        beq :+
+        lda #$90                ; C64 -> REU
+        jsr @dma
+        lda #0
+        sta first_run
+:       lda #$91                ; REU -> C64
+@dma:   pha
+        cmp #$90
+        bne :+
+        lda #<__BROWSER_LOAD__
+        ldx #>__BROWSER_LOAD__
+        bne :++
+:       lda #<__BROWSER_RUN__
+        ldx #>__BROWSER_RUN__
+:       sta REU_C64LO
+        stx REU_C64HI
+        lda #0
+        sta REU_LO
+        sta REU_MID
+        sta REU_ADDRCTL
+        lda #REU_BROWSER
+        sta REU_BANK
+        lda #<__BROWSER_SIZE__
+        sta REU_LENLO
+        lda #>__BROWSER_SIZE__
+        sta REU_LENHI
+        pla
+        sta REU_CMD
+        rts
+first_run:
+        .byte 1
 
 ; RESTORE: back to the ROM browser.
 nmi:    ldx #$FF

@@ -50,7 +50,11 @@ nearest of the 16 C64 colours. In multicolor mode every 4×8 cell can show three
 colours of its own plus one shared background colour. For each GBC palette, C64GB
 gives each distinct colour its own slot. Only a palette with four different colours,
 none of them the background, has to merge one colour into its nearest neighbour.
-Sprite colours are mapped onto the colours of the cell they cover.
+
+Sprites get colour slots too. For every cell a sprite covers, C64GB checks which
+colours the sprite really draws there and which colours the background pixels of
+that cell really use. Slots the background does not need go to the sprite's colours.
+Sprite pixels then use the nearest of the cell's four actual colours.
 
 | | |
 |---|---|
@@ -62,8 +66,9 @@ cgb-acid2 (above) with the reference image:
 
 <p align="center"><img src="docs/screenshots/cgb-acid2-reference.png" alt="cgb-acid2 reference"></p>
 
-The face, outline, eyes, nose and mouth are right. The blue "HELLO WORLD" sprites
-turn grey because blue is not among the colours of the cells they cover.
+The face, outline, nose, mouth and the blue "HELLO WORLD!" sprites are right. Where
+a cell needs more than four colours, some pixels get the nearest available colour.
+This happens around the eyes, for example.
 
 ## Features
 
@@ -172,7 +177,7 @@ Measured in sim65 (`make bench`) as C64 cycles per emulated Game Boy machine cyc
 | CPU-heavy test ROM, no rendering | 51.9 | 88% | 117% |
 | CPU-heavy, every frame rendered | 76.7 | 60% | 80% |
 | Libbet, every frame rendered | 69.1 | 66% | 88% |
-| cgb-acid2 (GBC mode), every frame rendered | 82.7 | 55% | 74% |
+| cgb-acid2 (GBC mode, many sprites), every frame rendered | 96.0 | 48% | 64% |
 
 By default the C64 build renders every second frame. Game Boy Color games that switch
 to double-speed mode need twice the CPU time, so they run at about half speed for now. Planned optimisations should
@@ -189,7 +194,7 @@ and byte-wise sprite masks instead of per-pixel plotting.
 - [ ] Sound through the SID
 - [ ] Save games to SD (`DOS_CMD_SAVE_REU`)
 - [x] Game Boy Color support (approximated with the 16 C64 colours)
-- [ ] Smarter GBC colour cells: use only the colours a cell actually shows, which frees slots for sprite colours
+- [x] Sprite-aware GBC colour cells: background slots a cell doesn't use go to sprite colours
 
 ## Credits
 
