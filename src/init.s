@@ -136,6 +136,13 @@ gb_init:
 :       inx                     ; X = 0: no battery
         stx has_batt
         ldx #0
+        cmp #$0F                ; MBC3 + timer (+ battery / RAM)
+        beq :+
+        cmp #$10
+        bne :++
+:       inx
+:       stx has_rtc
+        ldx #0
         cmp #$01
         bcc @mbc
         ldx #1

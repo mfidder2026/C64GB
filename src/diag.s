@@ -4,6 +4,7 @@
 ; ---------------------------------------------------------------------------
 
 .segment "BSS"
+rtc_buf:     .res 48            ; clock state block for save files
 ntsc:        .res 1             ; 1 = NTSC machine
 frame_ticks: .res 2             ; CIA ticks per GB frame
 snd_k:       .res 3             ; pulse frequency constant for this machine

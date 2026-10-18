@@ -33,8 +33,10 @@ rd_slow:
         lda IORAM,x
         rts
 @io:    jmp io_read_x
-@none:  lda #$FF                ; disabled cartridge RAM etc.
-        rts
+@none:  jsr rtc_read              ; MBC3 clock register selected?
+        bcs :+
+        lda #$FF                ; disabled cartridge RAM etc.
+:       rts
 
 ; Write A to GB address ml/mh. Clobbers X, Y.
 wr:
@@ -81,7 +83,7 @@ wr_slow:
         ldy ml
         sta (mp),y
 .endif
-@ign:   rts
+@ign:   jmp rtc_write               ; (only acts with an MBC3 clock selected)
 @ff:    ldx ml
         bpl @io
         cpx #$FF
@@ -308,20 +310,9 @@ sram_map:
         lda mbc_type
         cmp #3
         bne @on
-        lda ram_bank            ; MBC3: RTC register selected?
+        lda ram_bank            ; MBC3 clock register: slow path (rtc.s)
         cmp #8
-        bcc @on
-        lda #>FFPG              ; RTC not emulated: reads $FF, writes ignored
-        ldx #31
-:       sta RMAP+$A0,x
-        dex
-        bpl :-
-        lda #0
-        ldx #31
-:       sta WMAP+$A0,x
-        dex
-        bpl :-
-        rts
+        bcs @off
 @on:
 .ifdef SRAM_RES
         ldx #31                 ; sim65: one resident bank
@@ -364,10 +355,11 @@ mbc_ram_enable:
         lda mtmp
         and #$0F
         cmp #$0A
-        beq :+
-        lda #0
-        beq :++
-:       sta sav_dirty           ; the game may write its save data now
+        bne :+
+        lda #1                  ; ram_en is 0/1 (it is ANDed with has_sram)
+        sta sav_dirty           ; the game may write its save data now
+        bne :++
+:       lda #0
 :       sta ram_en
         jmp sram_map
 
@@ -451,11 +443,12 @@ mbc3:
 :       ldx #0
         jmp set_bank_hi
 @upper: cpx #$60
-        bcs @r                  ; $6000-$7FFF: RTC latch, ignored
+        bcs @latch
         lda mtmp
         jsr set_ram_bank
         jmp sram_map
-@r:     rts
+@latch: lda mtmp                ; $6000-$7FFF: clock latch
+        jmp rtc_latch
 
 mbc5:
         cpx #$20

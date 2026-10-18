@@ -390,6 +390,7 @@ load_entry:
         lda #0                  ; ROM -> REU $000000
         jsr load_open
         bne @fail
+        jsr sram_clear          ; clean RAM area (also when the save is short)
         jsr make_savname        ; save file next to it? -> REU $FE0000
         lda #<(sav_name-1)
         sta b_ptr

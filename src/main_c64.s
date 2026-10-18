@@ -86,6 +86,12 @@ start:
         lda sav_loaded          ; keep a save file loaded by the browser
         bne :+
         jsr sram_clear
+:       lda has_rtc             ; clock state from the loaded save file
+        beq :+
+        lda sav_loaded
+        beq :+
+        lda #$91
+        jsr rtc_dma
 :       lda has_batt            ; saving possible: battery RAM and a file name
         beq :+
         lda sav_name
@@ -202,10 +208,14 @@ f1_prev:    .res 1
 ; Write the cartridge RAM to the save file through the Ultimate DOS.
 save_game:
         lda sav_active
-        beq @r
+        bne :+
+        rts
+:
         lda #5                  ; green border while saving
         sta $D020
         jsr sram_flush
+        lda #$90                ; clock state goes right after the RAM data
+        jsr rtc_dma
         lda #$01                ; open file for writing, always overwrite
         sta UCI_CMD
         lda #$02
@@ -231,7 +241,10 @@ save_game:
         sta UCI_CMD
         lda #0
         sta UCI_CMD
-        sta UCI_CMD
+        ldx has_rtc             ; + 48 bytes of clock state
+        beq :+
+        lda #48
+:       sta UCI_CMD
         lda sram_pages
         sta UCI_CMD
         lda sram_pages+1
@@ -389,6 +402,7 @@ vblank_hook:
         bne :+
         inc frames+1
 :       jsr frame_pace
+        jsr rtc_tick
         jsr sound_frame
         jsr read_input
 .ifdef AUTOKEYS
@@ -574,6 +588,59 @@ autokey_tab:
 .endif
 
 .segment "HICODE"            ; resident helpers for save games
+
+; Clock state <-> REU right after the cartridge RAM ($FE0000 + RAM size),
+; 48 bytes as in other emulators' .sav files: S, M, H, DL, DH and the latched
+; copies as 32-bit values, then a 64-bit timestamp (0 here).
+; A = $90: store (build the block first), $91: load (parse it after).
+rtc_dma:
+        pha
+        cmp #$90
+        bne :+++
+        ldx #47
+        lda #0
+:       sta rtc_buf,x
+        dex
+        bpl :-
+        ldy #4
+:       ldx rtc_off,y
+        lda rtc_reg,y
+        sta rtc_buf,x
+        lda rtc_lat,y
+        sta rtc_buf+20,x
+        dey
+        bpl :-
+:       lda #<rtc_buf
+        sta REU_C64LO
+        lda #>rtc_buf
+        sta REU_C64HI
+        lda #0
+        sta REU_LO
+        sta REU_ADDRCTL
+        sta REU_LENHI
+        lda sram_pages
+        sta REU_MID
+        lda sram_pages+1
+        clc
+        adc #REU_SRAM
+        sta REU_BANK
+        lda #48
+        sta REU_LENLO
+        pla
+        sta REU_CMD
+        cmp #$91
+        bne @r
+        ldy #4
+:       ldx rtc_off,y
+        lda rtc_buf,x
+        sta rtc_reg,y
+        lda rtc_buf+20,x
+        sta rtc_lat,y
+        dey
+        bpl :-
+@r:     rts
+rtc_off: .byte 0, 4, 8, 12, 16
+
 ; Push the command written to UCI_CMD, wait, drain the reply.
 ; C=1 if the status starts with "00".
 uci_go:
@@ -719,6 +786,8 @@ video_init:
 .include "io.s"
 .include "init.s"
 .include "cgb.s"
+.define RTCSEG "HICODE"
+.include "rtc.s"
 .include "sound.s"
 .include "render.s"
 .include "browser.s"

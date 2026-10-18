@@ -279,6 +279,7 @@ hblank_hook:
         rts
 
 vblank_hook:
+        jsr rtc_tick
         inc frames
         bne :+
         inc frames+1
@@ -557,6 +558,8 @@ sim_illegal:
 .include "io.s"
 .include "init.s"
 .include "cgb.s"
+.define RTCSEG "CODE"
+.include "rtc.s"
 .ifdef RENDER
 .include "render.s"
 .endif

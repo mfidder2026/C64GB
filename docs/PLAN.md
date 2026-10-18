@@ -60,7 +60,7 @@ flowchart LR
 | 4 | Sprites, window, palettes, frame skip, fine SCX scroll | Homebrew games playable | all but fine SCX scroll |
 | 5 | Performance: profile in sim65, threaded dispatch, tile cache | ≥ 90% speed at 48 MHz | |
 | 6 | Sound via SID | Recognisable music | ✅ first version (checked with VICE SID register dumps) |
-| 7 | Cartridge RAM saves via `SAVE_REU`, basic MBC3 RTC | Games can save | saves built (F1 / RESTORE), untested on hardware; no RTC |
+| 7 | Cartridge RAM saves via `SAVE_REU`, basic MBC3 RTC | Games can save | saves built (F1 / RESTORE), untested on hardware; MBC3 RTC passes rtc3test basic and range tests |
 | 8 | Accurate STAT/mode-3 timing | Raster-effect games correct | |
 | 9 | Game Boy Color | Colours approximated with the 16 C64 colours | ✅ first version (µCity, cgb-acid2) |
 
@@ -123,6 +123,7 @@ with a one-entry cache per sprite.
 | Blargg `halt_bug` | pass (VICE, result shown on screen) |
 | Blargg `mem_timing` | fail: memory accesses are modelled at the end of an instruction. Moving reads one cycle earlier broke `instr_timing`, so a per-M-cycle access model is needed. |
 | `interrupt_time` (GBC double speed) | fail, not investigated |
+| `rtc3test` basic and range | pass (sim65 frame dumps); sub-second writes not emulated |
 | µCity status bar | renders correctly in sim65 frame dumps (with GBC WRAM banks now emulated there); the cut-off seen in VICE screenshots was a capture taken mid-frame |
 
 Debugging aids in the sim65 build:

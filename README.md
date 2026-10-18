@@ -77,6 +77,10 @@ This happens around the eyes, for example.
   and `halt_bug`.
 - **Memory bank controllers**: MBC1, MBC2, MBC3 and MBC5. ROMs up to 8 MB are
   streamed from the REU through a 256-byte page cache.
+- **MBC3 real-time clock** for games such as Pokémon Gold/Silver/Crystal:
+  - passes the basic and range tests of `rtc3test`
+  - the clock state is stored in the `.sav` file, in the common 48-byte format
+  - the clock runs while the game runs
 - **Timers, interrupts, HALT and the EI delay** are driven by a cycle-exact event
   scheduler. Timer overflows are scheduled on the exact cycle.
 - **Scanline renderer**: background, window and up to 10 sprites per line. It supports
@@ -224,6 +228,8 @@ prints C64 cycles per routine. It is how the hot spots above were found and redu
 - [ ] Performance work towards full speed (pre-converted tile cache)
 - [x] Sound through the SID (first version)
 - [x] Save games to USB/SD (`DOS_CMD_LOAD_REU` / `DOS_CMD_SAVE_REU`), not yet tested on hardware
+- [x] MBC3 real-time clock
+- [ ] Catch up the clock with real time via the Ultimate's RTC
 - [x] Game Boy Color support (approximated with the 16 C64 colours)
 - [x] Sprite-aware GBC colour cells: background slots a cell doesn't use go to sprite colours
 
