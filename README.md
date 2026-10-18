@@ -73,7 +73,8 @@ This happens around the eyes, for example.
 ## Features
 
 - **LR35902 CPU core**: all 256 opcodes plus the CB prefix, with exact
-  instruction timing. It passes all 11 Blargg `cpu_instrs` tests and `instr_timing`.
+  instruction timing. It passes all 11 Blargg `cpu_instrs` tests, `instr_timing`
+  and `halt_bug`.
 - **Memory bank controllers**: MBC1, MBC2, MBC3 and MBC5. ROMs up to 8 MB are
   streamed from the REU through a 256-byte page cache.
 - **Timers, interrupts, HALT and the EI delay** are driven by a cycle-exact event

@@ -115,7 +115,17 @@ with a one-entry cache per sprite.
   sweep are stepped.
 - **Status:** NR52 reports the channel status.
 
-## 7. Risks / to be measured on real hardware
+## 7. Accuracy status
+
+| Test | Result |
+|---|---|
+| Blargg `cpu_instrs` (11), `instr_timing` | pass (sim65) |
+| Blargg `halt_bug` | pass (VICE, result shown on screen) |
+| Blargg `mem_timing` | fail: memory accesses are modelled at the end of an instruction. Moving reads one cycle earlier broke `instr_timing`, so a per-M-cycle access model is needed. |
+| `interrupt_time` (GBC double speed) | fail, not investigated |
+| µCity status bar | top lines show the map instead of the window. Needs tracing with GBC WRAM banks, which the sim65 build does not emulate. |
+
+## 7b. Risks / to be measured on real hardware
 
 1. **REU DMA speed in turbo mode**: does DMA run at 1 MHz or faster? Determines the
    cost of a cache miss (256 bytes).

@@ -595,8 +595,26 @@ op_halt:
         sta halted
         jmp do_event
 @nohalt:
-        jsr force_event
+        lda ime                                 ; IME=0: HALT bug, the next
+        bne :+                                  ; opcode fetch keeps PC
+        lda #$4C
+        sta zl_go
+        lda #<halt_fix
+        sta zl_go+1
+        lda #>halt_fix
+        sta zl_go+2
+:       jsr force_event
         NEXT
+
+; One fetch without "inc pcl": restore the dispatcher and dispatch.
+halt_fix:
+        lda #$E6                                ; inc zp
+        sta zl_go
+        lda #pcl
+        sta zl_go+1
+        lda #$F0                                ; beq
+        sta zl_go+2
+        jmp zl_disp
 
 ; ---- opcodes $80-$BF: ALU A,r -----------------------------------------------
 
