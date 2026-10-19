@@ -52,6 +52,40 @@ sndk_hi: .byte ^2231950, ^2150176
 
 .segment "DIAG"
 
+.ifdef AUTOLOAD
+; Test builds: load a ROM from /Temp/C64GB without the browser UI
+; (AUTOLOAD = 1 dmg-acid2, 2 libbet, 3 ucity).
+autoload:
+        lda #0
+        sta sav_name
+        sta sav_loaded
+        jsr text_init
+        lda #$04
+        sta UCI_CTRL
+        lda #$08
+        sta UCI_CTRL
+        lda #$02
+        sta UCI_CTRL
+        lda #<(al_dir-1)
+        sta b_ptr
+        lda #>(al_dir-1)
+        sta b_ptr+1
+        jsr chdir_entry
+        lda #<(al_rom-1)
+        sta b_ptr
+        lda #>(al_rom-1)
+        sta b_ptr+1
+        jmp load_entry
+al_dir: .byte "/Temp/C64GB", 0
+.if AUTOLOAD = 1
+al_rom: .byte "dmg-acid2.gb", 0
+.elseif AUTOLOAD = 2
+al_rom: .byte "libbet.gb", 0
+.else
+al_rom: .byte "ucity.gbc", 0
+.endif
+.endif
+
 ; From the browser's input loop: D opens the diagnostics screen.
 diag_key:
         lda #$FB                ; column 2, row 2 = D
@@ -107,34 +141,77 @@ diag:
         ldy #7
         jsr dg_flag
 
-        ; CPU: iterations of an 18-cycle loop during one video frame
-        jsr dg_sync
+        ; CPU: 320-cycle RAM-only blocks from raster line 0 to line 256
+        ; (256 lines: 16128 cycles PAL, 16640 NTSC at 1 MHz).
+        ; Tenths of MHz = blocks * 3200 / cycles.
         lda #0
-        sta div_q
+        sta div_r
+        sta div_r+1
+:       bit $D011               ; wait for lines 256+, then line 0
+        bpl :-
+:       bit $D011
+        bmi :-
+@blk:   ldx #64
+:       dex
+        bne :-
+        inc div_r
+        bne :+
+        inc div_r+1
+:       bit $D011
+        bpl @blk
+        lda div_r               ; div_q = blocks * 25 * 128 = blocks * 3200
+        sta div_q               ; (dg_buf = blocks, then blocks * 8)
+        sta dg_buf
+        lda div_r+1
         sta div_q+1
-        sta div_q+2
-@cl:    inc div_q
-        bne :+
-        inc div_q+1
-        bne :+
-        inc div_q+2
-:       lda $D012
-        cmp #$80
-        bne @cl
-        lda #109                ; tenths of MHz = loops * 18 / 1965.6 (PAL)
-        ldx ntsc
-        beq :+
-        lda #95                 ; NTSC frame: 17095 cycles
-:       sta div_v
+        sta dg_buf+1
         lda #0
-        sta div_v+1
+        sta div_q+2
+        sta dg_buf+2
+        ldx #3
+:       asl dg_buf
+        rol dg_buf+1
+        rol dg_buf+2
+        dex
+        bne :-
+        jsr @add                ; q = b + 8b
+        asl dg_buf
+        rol dg_buf+1
+        rol dg_buf+2
+        jsr @add                ; q = b + 8b + 16b = 25b
+        ldx #7
+:       asl div_q
+        rol div_q+1
+        rol div_q+2
+        dex
+        bne :-
+        lda #<16128
+        ldx #>16128
+        ldy ntsc
+        beq :+
+        lda #<16640
+        ldx #>16640
+:       sta div_v
+        stx div_v+1
         jsr divide
         lda #<dg_cpu
         ldx #>dg_cpu
         ldy #9
         sec
         jsr dg_num
-
+        jmp @cia
+@add:   clc                     ; div_q += dg_buf
+        lda div_q
+        adc dg_buf
+        sta div_q
+        lda div_q+1
+        adc dg_buf+1
+        sta div_q+1
+        lda div_q+2
+        adc dg_buf+2
+        sta div_q+2
+        rts
+@cia:
         ; CIA ticks during one video frame (19656 PAL / 17095 NTSC at 1 MHz)
         jsr dg_sync
         jsr timer_read

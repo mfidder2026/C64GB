@@ -133,7 +133,26 @@ Debugging aids in the sim65 build:
 
 GBC WRAM banks are backed by a host file (`wram.bin`).
 
-## 7b. Risks / to be measured on real hardware
+## 7b. First run on real hardware (C64 Ultimate, firmware 1.1.0, 19 Oct 2026)
+
+| Item | Result |
+|---|---|
+| ROM browser over the Command Interface | works |
+| Loading a ROM into the REU, page cache, renderer | works: dmg-acid2 pixel-exact on the machine (bitmap read back over REST) |
+| CIA timer | 1 MHz (19,596 ticks per PAL frame), so frame pacing holds |
+| REU 8 KB DMA | about 8,300–8,700 CIA ticks (1 byte/µs at 1 MHz CPU) |
+| Turbo | **not engaging**: about 0.8–0.9 MHz effective with Turbo Control Off, Manual (8–64 MHz), TurboEnable Bit and C64U Turbo Registers ($D031 reads back the speed index), with or without REU/UCI. Badline Timing does take effect. Still open: whether settings changed over REST apply differently from the on-screen menu. |
+
+Remote tools:
+- `tools/u64screen.py` reads the text screen
+- `tools/u64bitmap.py` reads the GB bitmap
+- `tools/u64grab.py` grabs the video stream (needs wired Ethernet)
+
+Test builds:
+- `-D DIAGTEST` opens the diagnostics at start-up
+- `-D AUTOLOAD=n` loads a ROM from `/Temp/C64GB` without the UI
+
+## 7c. Risks / to be measured on real hardware
 
 1. **REU DMA speed in turbo mode**: does DMA run at 1 MHz or faster? Determines the
    cost of a cache miss (256 bytes).

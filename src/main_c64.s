@@ -71,7 +71,14 @@ start:
         jsr browser_fetch       ; (also installs the $C300 code on the first start)
         jsr video_detect
         jsr zp_clear
+.ifdef DIAGTEST
+        jsr diag                ; test build: diagnostics first
+.endif
+.ifdef AUTOLOAD
+        jsr autoload            ; test build: fixed ROM
+.else
         jsr browser             ; choose a ROM and load it into the REU
+.endif
         jsr zp_clear
         jsr video_init
         jsr render_init

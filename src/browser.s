@@ -364,14 +364,14 @@ show_path:
         ldx #2
         jsr uci_send
         jsr uci_data
-        jsr uci_status
-        jsr uci_accept
-        ldx #1
-        jsr clear_row
+        ldx #1                  ; print the path before the status reply
+        jsr clear_row           ; reuses the buffer
         lda #<respbuf
         ldx #>respbuf
         ldy #1
-        jmp print_at
+        jsr print_at
+        jsr uci_status
+        jmp uci_accept
 
 ; Open the selected file and load it into the REU at address 0.
 load_entry:
